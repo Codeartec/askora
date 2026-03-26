@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+coverage/
+.turbo/
+apps/api/prisma/*.db
+.private/
+*.tsbuildinfo

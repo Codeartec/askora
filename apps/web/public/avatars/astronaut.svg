@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="card" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="55%" stop-color="#172554"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0b1220"/>
+    </linearGradient>
+    <linearGradient id="helmet" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f9fafb"/>
+      <stop offset="100%" stop-color="#d1d5db"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="40" fill="url(#card)"/>
+  <circle cx="128" cy="112" r="66" fill="url(#helmet)"/>
+  <circle cx="128" cy="112" r="48" fill="url(#visor)"/>
+  <circle cx="110" cy="104" r="8" fill="#93c5fd"/>
+  <circle cx="146" cy="118" r="6" fill="#60a5fa"/>
+  <rect x="76" y="168" width="104" height="56" rx="20" fill="url(#helmet)"/>
+  <rect x="92" y="184" width="72" height="10" rx="5" fill="#9ca3af"/>
+  <rect x="92" y="202" width="44" height="10" rx="5" fill="#9ca3af"/>
+</svg>

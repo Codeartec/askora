@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="card" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="55%" stop-color="#172554"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="50%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="40" fill="url(#card)"/>
+  <path d="M52 152c0-44 36-76 86-76 30 0 52 10 70 28l22-14v40l-22-14c0 44-36 76-86 76-40 0-70-18-70-40z" fill="url(#body)"/>
+  <path d="M70 140c8-6 18-10 28-12" fill="none" stroke="#bae6fd" stroke-width="6" stroke-linecap="round" opacity="0.6"/>
+  <circle cx="152" cy="124" r="7" fill="#0f172a"/>
+  <circle cx="150" cy="122" r="2" fill="#e0f2fe" opacity="0.5"/>
+  <path d="M84 156c14 14 34 22 54 22 28 0 50-10 66-26" fill="none" stroke="#0c4a6e" stroke-width="10" stroke-linecap="round"/>
+  <path d="M120 76c6-16 18-26 30-28" fill="none" stroke="#7dd3fc" stroke-width="10" stroke-linecap="round"/>
+</svg>

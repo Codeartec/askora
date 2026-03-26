@@ -1,0 +1,645 @@
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  SubscribeMessage,
+  ConnectedSocket,
+  MessageBody,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+} from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
+import { Server, Socket } from 'socket.io';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
+import { PoolsService } from './pools.service';
+import { QuestionsService } from '../questions/questions.service';
+import { ModerationService } from '../moderation/moderation.service';
+import { MergeService } from '../questions/merge.service';
+import { PollsService } from '../polls/polls.service';
+
+@WebSocketGateway({
+  cors: { origin: '*' },
+  namespace: '/',
+})
+export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  @WebSocketServer() server: Server;
+  private readonly logger = new Logger(PoolsGateway.name);
+
+  constructor(
+    private jwtService: JwtService,
+    private prisma: PrismaService,
+    private poolsService: PoolsService,
+    private questionsService: QuestionsService,
+    private moderationService: ModerationService,
+    private mergeService: MergeService,
+    private pollsService: PollsService,
+  ) {}
+
+  async handleConnection(client: Socket) {
+    try {
+      const auth = client.handshake?.auth;
+      if (auth?.token) {
+        const payload = this.jwtService.verify(auth.token);
+        const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+        if (user) {
+          client.data = { user, authType: 'jwt' };
+          this.logger.log(`User connected: ${user.email}`);
+          return;
+        }
+      }
+      if (auth?.sessionToken) {
+        const participant = await this.prisma.participant.findUnique({
+          where: { sessionToken: auth.sessionToken },
+        });
+        if (participant) {
+          client.data = { participant, authType: 'session' };
+          this.logger.log(`Participant connected: ${participant.id}`);
+          return;
+        }
+      }
+      client.data = { authType: 'anonymous' };
+      this.logger.log(`Anonymous connection: ${client.id}`);
+    } catch (err) {
+      client.data = { authType: 'anonymous' };
+      this.logger.warn(`Auth failed for ${client.id}, allowing as anonymous`);
+    }
+  }
+
+  handleDisconnect(client: Socket) {
+    this.logger.log(`Client disconnected: ${client.id}`);
+    const poolCode = client.data?.poolCode as string | undefined;
+    if (poolCode) {
+      void this.broadcastParticipantRoster(poolCode);
+    }
+  }
+
+  @SubscribeMessage('pool:join')
+  async handleJoinPool(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { poolCode: string; accessKey?: string },
+  ) {
+    const pool = await this.poolsService.findByCode(data.poolCode.toUpperCase());
+    if (!pool) {
+      client.emit('error', { message: 'Pool not found' });
+      return;
+    }
+
+    const roomName = `pool:${pool.code}`;
+    client.join(roomName);
+    client.data.poolCode = pool.code;
+    client.data.poolId = pool.id;
+
+    const jwtUserId = this.resolveJwtUserId(client);
+    // Hydrate JWT user before participantId / admin so we are not blocked by async handleConnection
+    if (jwtUserId && !client.data.user) {
+      const user = await this.prisma.user.findUnique({ where: { id: jwtUserId } });
+      if (user) {
+        client.data = { ...client.data, user, authType: 'jwt' };
+      }
+    }
+
+    // Resolve participantId from session or user
+    if (client.data.participant) {
+      client.data.participantId = client.data.participant.id;
+    } else if (client.data.user) {
+      const existing = await this.prisma.participant.findFirst({
+        where: { poolId: pool.id, userId: client.data.user.id },
+      });
+      if (existing) client.data.participantId = existing.id;
+    }
+
+    if (jwtUserId === pool.creatorId) {
+      client.join(`${roomName}:admin`);
+    }
+
+    const isCreator = jwtUserId === pool.creatorId;
+    const handshakeSessionToken = client.handshake?.auth?.sessionToken as string | undefined;
+
+    // `handleConnection` is async and may not have hydrated `client.data` yet when the first message arrives.
+    // Try to resolve participant from handshake sessionToken here as well.
+    if (!client.data?.participant && handshakeSessionToken) {
+      const participant = await this.prisma.participant.findUnique({
+        where: { sessionToken: handshakeSessionToken },
+      });
+      if (participant) {
+        client.data = { ...client.data, participant, authType: 'session' };
+        client.data.participantId = participant.id;
+      }
+    }
+
+    const hasSessionParticipant = !!client.data?.participantId || !!client.data?.participant?.id;
+
+    // For private pools, require accessKey only for unauthenticated clients.
+    // - Host (JWT creator) is allowed without accessKey
+    // - Participants who already joined via HTTP and present a valid sessionToken are allowed without accessKey
+    if (!pool.isPublic && pool.accessKey && !isCreator && !hasSessionParticipant && data.accessKey !== pool.accessKey) {
+      client.emit('error', { message: 'Invalid access key' });
+      return;
+    }
+
+    const participantCount = await this.poolsService.getParticipantCount(pool.id);
+
+    this.server.to(`${roomName}:admin`).emit('participant:joined', {
+      count: participantCount,
+      socketId: client.id,
+    });
+
+    const includeSources = jwtUserId === pool.creatorId;
+    const displayItems = await this.questionsService.buildDisplayItems(pool.id, includeSources);
+
+    const activePollRow = await this.pollsService.findActiveByPoolId(pool.id);
+    const activePoll = activePollRow
+      ? {
+          poll: {
+            id: activePollRow.id,
+            questionText: activePollRow.questionText,
+            type: activePollRow.type,
+            showResultsToParticipants: activePollRow.showResultsToParticipants,
+          },
+          options: activePollRow.options,
+        }
+      : null;
+
+    client.emit('pool:joined', {
+      pool: {
+        id: pool.id,
+        code: pool.code,
+        title: pool.title,
+        description: pool.description,
+        status: pool.status,
+        genre: pool.genre,
+        creator: pool.creator,
+        lastQuestionMergeAt: pool.lastQuestionMergeAt?.toISOString() ?? null,
+        questionsSinceMerge: pool.questionsSinceMerge,
+      },
+      displayItems,
+      participantCount,
+      activePoll,
+    });
+
+    if (jwtUserId === pool.creatorId && activePollRow) {
+      const snapshot = await this.pollsService.getResults(activePollRow.id);
+      if (snapshot) {
+        client.emit('poll:response-received', { pollId: activePollRow.id, results: snapshot });
+      }
+    }
+
+    void this.broadcastParticipantRoster(pool.code);
+  }
+
+  @SubscribeMessage('pool:update-status')
+  async handleUpdateStatus(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { status: string },
+  ) {
+    if (client.data.authType !== 'jwt') {
+      client.emit('error', { message: 'Unauthorized' });
+      return;
+    }
+
+    const poolCode = client.data.poolCode;
+    if (!poolCode) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user.id) {
+      client.emit('error', { message: 'Not the pool creator' });
+      return;
+    }
+
+    const updated = await this.poolsService.updateStatus(pool.id, data.status);
+    this.server.to(`pool:${poolCode}`).emit('pool:status-changed', { status: updated.status });
+  }
+
+  @SubscribeMessage('question:submit')
+  async handleQuestionSubmit(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { text: string },
+  ) {
+    const participantId = this.getParticipantId(client);
+    const poolId = client.data.poolId;
+    const poolCode = client.data.poolCode;
+    if (!participantId || !poolId || !poolCode) {
+      client.emit('error', { message: 'Not in a pool' });
+      return;
+    }
+
+    const pool = await this.prisma.pool.findUnique({ where: { id: poolId } });
+    if (!pool || pool.status !== 'active') {
+      client.emit('error', { message: 'Pool is not accepting questions' });
+      return;
+    }
+
+    const modResult = await this.moderationService.moderateQuestion(
+      data.text,
+      pool.customFilterRules,
+    );
+
+    let moderationStatus = 'approved';
+    let moderationReason: string | null = null;
+    if (modResult.standardViolation) {
+      moderationStatus = 'flagged_standard';
+      moderationReason = modResult.standardReason;
+    } else if (modResult.customViolation) {
+      moderationStatus = 'flagged_custom';
+      moderationReason = modResult.customReason;
+    }
+
+    const question = await this.questionsService.create({
+      poolId,
+      participantId,
+      originalText: data.text,
+      moderationStatus,
+      moderationReason,
+    });
+
+    if (moderationStatus === 'approved') {
+      const updatedPool = await this.prisma.pool.update({
+        where: { id: poolId },
+        data: { questionsSinceMerge: { increment: 1 } },
+        select: { questionsSinceMerge: true, creatorId: true },
+      });
+
+      if (updatedPool.questionsSinceMerge >= 3) {
+        await this.mergeService.runMergePass(poolId);
+        await this.broadcastDisplaySync(poolCode, poolId, updatedPool.creatorId);
+      } else {
+        const enriched = await this.questionsService.enrichQuestionForEmit(question.id);
+        if (enriched) {
+          const displayItem = this.questionsService.standaloneQuestionToDisplayItem(enriched);
+          this.server.to(`pool:${poolCode}`).emit('question:new', { displayItem });
+        }
+      }
+    } else {
+      this.server.to(`pool:${poolCode}:admin`).emit('question:flagged', {
+        question,
+        moderationStatus,
+        reason: moderationReason,
+      });
+      client.emit('question:submitted', { status: 'pending_review' });
+    }
+  }
+
+  @SubscribeMessage('question:vote')
+  async handleQuestionVote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { questionId?: string; clusterId?: string },
+  ) {
+    const participantId = this.getParticipantId(client);
+    const poolCode = client.data.poolCode;
+    if (!participantId || !poolCode) {
+      client.emit('error', { message: 'Not in a pool' });
+      return;
+    }
+
+    if (!data.questionId && !data.clusterId) {
+      client.emit('error', { message: 'questionId or clusterId required' });
+      return;
+    }
+
+    const res = await this.questionsService.voteOnTarget(participantId, data.questionId, data.clusterId);
+    if (!res) {
+      client.emit('error', { message: 'Invalid vote target' });
+      return;
+    }
+
+    this.server.to(`pool:${poolCode}`).emit('question:vote-updated', {
+      targetKind: res.targetKind,
+      targetId: res.targetId,
+      voteCount: res.voteCount,
+      voted: res.voted,
+    });
+  }
+
+  @SubscribeMessage('question:moderate')
+  async handleQuestionModerate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { questionId: string; action: 'approve' | 'reject' },
+  ) {
+    if (client.data.authType !== 'jwt') {
+      client.emit('error', { message: 'Unauthorized' });
+      return;
+    }
+
+    const poolCode = client.data.poolCode;
+    if (!poolCode) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user.id) {
+      client.emit('error', { message: 'Not the pool creator' });
+      return;
+    }
+
+    if (data.action === 'approve') {
+      await this.questionsService.updateModeration(data.questionId, 'approved');
+      const updatedPool = await this.prisma.pool.update({
+        where: { id: pool.id },
+        data: { questionsSinceMerge: { increment: 1 } },
+        select: { questionsSinceMerge: true, creatorId: true },
+      });
+
+      if (updatedPool.questionsSinceMerge >= 3) {
+        await this.mergeService.runMergePass(pool.id);
+        await this.broadcastDisplaySync(poolCode, pool.id, updatedPool.creatorId);
+      } else {
+        const enriched = await this.questionsService.enrichQuestionForEmit(data.questionId);
+        if (enriched) {
+          const displayItem = this.questionsService.standaloneQuestionToDisplayItem(enriched);
+          this.server.to(`pool:${poolCode}`).emit('question:new', { displayItem });
+        }
+      }
+    } else {
+      await this.questionsService.updateModeration(data.questionId, 'rejected');
+    }
+
+    client.emit('question:moderated', { questionId: data.questionId, action: data.action });
+  }
+
+  @SubscribeMessage('llm:trigger-merge')
+  async handleTriggerMerge(
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (client.data.authType !== 'jwt') {
+      client.emit('error', { message: 'Unauthorized' });
+      return;
+    }
+
+    const poolCode = client.data.poolCode;
+    const poolId = client.data.poolId;
+    if (!poolCode || !poolId) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user.id) {
+      client.emit('error', { message: 'Not the pool creator' });
+      return;
+    }
+
+    client.emit('llm:merge-started', {});
+
+    const result = await this.mergeService.runMergePass(poolId);
+    await this.broadcastDisplaySync(poolCode, poolId, pool.creatorId);
+
+    client.emit('llm:merge-completed', { clustersCreated: result.clusters.length });
+  }
+
+  @SubscribeMessage('poll:create')
+  async handlePollCreate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      questionText: string;
+      type: string;
+      options?: string[];
+      showResultsToParticipants?: boolean;
+      asDraft?: boolean;
+    },
+  ) {
+    if (client.data.authType !== 'jwt') {
+      client.emit('error', { message: 'Unauthorized' });
+      return;
+    }
+
+    const poolId = client.data.poolId;
+    const poolCode = client.data.poolCode;
+    if (!poolId || !poolCode) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user.id) {
+      client.emit('error', { message: 'Not the pool creator' });
+      return;
+    }
+
+    const created = await this.pollsService.create(poolId, data);
+    if (!created) return;
+
+    if (data.asDraft) {
+      client.emit('poll:created', { poll: created });
+      return;
+    }
+
+    await this.pollsService.closeOtherActivePolls(poolId, created.id);
+    const launched = await this.pollsService.launch(created.id);
+    client.emit('poll:created', { poll: launched });
+    this.broadcastPollLaunched(poolCode, launched);
+  }
+
+  @SubscribeMessage('poll:launch')
+  async handlePollLaunch(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { pollId: string },
+  ) {
+    if (client.data.authType !== 'jwt') return;
+    const poolCode = client.data.poolCode;
+    const poolId = client.data.poolId;
+    if (!poolCode || !poolId) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user?.id) return;
+
+    const pollRow = await this.prisma.poll.findFirst({
+      where: { id: data.pollId, poolId },
+    });
+    if (!pollRow) return;
+
+    if (pollRow.status !== 'draft') {
+      client.emit('error', { message: 'Poll is not a draft' });
+      return;
+    }
+
+    await this.pollsService.closeOtherActivePolls(poolId, data.pollId);
+    const poll = await this.pollsService.launch(data.pollId);
+    this.broadcastPollLaunched(poolCode, poll);
+  }
+
+  @SubscribeMessage('poll:respond')
+  async handlePollRespond(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { pollId: string; pollOptionId?: string; freeText?: string },
+  ) {
+    const participantId = this.getParticipantId(client);
+    const poolCode = client.data.poolCode;
+    if (!participantId || !poolCode) return;
+
+    await this.pollsService.respond(data.pollId, participantId, {
+      pollOptionId: data.pollOptionId,
+      freeText: data.freeText,
+    });
+
+    const results = await this.pollsService.getResults(data.pollId);
+    this.server.to(`pool:${poolCode}:admin`).emit('poll:response-received', {
+      pollId: data.pollId,
+      results,
+    });
+  }
+
+  @SubscribeMessage('poll:close')
+  async handlePollClose(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { pollId: string },
+  ) {
+    if (client.data.authType !== 'jwt') return;
+    const poolCode = client.data.poolCode;
+    const poolId = client.data.poolId;
+    if (!poolCode || !poolId) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user?.id) return;
+
+    const pollRow = await this.prisma.poll.findFirst({
+      where: { id: data.pollId, poolId },
+    });
+    if (!pollRow) return;
+
+    const show = pollRow.showResultsToParticipants;
+    await this.pollsService.close(data.pollId);
+    const full = await this.pollsService.getResults(data.pollId);
+    if (!full) return;
+
+    const roomName = `pool:${poolCode}`;
+    const publicResults = show ? this.pollsService.toPublicResults(full) : null;
+
+    this.server.to(`${roomName}:admin`).emit('poll:closed', {
+      pollId: data.pollId,
+      showResultsToParticipants: show,
+      results: full,
+    });
+
+    this.server.to(roomName).except(`${roomName}:admin`).emit('poll:closed', {
+      pollId: data.pollId,
+      showResultsToParticipants: show,
+      results: publicResults,
+    });
+  }
+
+  private resolveJwtUserIdFromHandshake(client: { data?: any; handshake?: any }): string | undefined {
+    if (client.data?.user?.id) {
+      return client.data.user.id;
+    }
+    const token = client.handshake?.auth?.token as string | undefined;
+    if (!token) return undefined;
+    try {
+      const payload = this.jwtService.verify(token) as { sub: string };
+      return payload.sub;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private resolveJwtUserId(client: Socket): string | undefined {
+    return this.resolveJwtUserIdFromHandshake(client);
+  }
+
+  private remoteIsPoolCreator(remote: { data?: any; handshake?: any }, creatorId: string): boolean {
+    const uid = this.resolveJwtUserIdFromHandshake(remote);
+    return uid !== undefined && uid === creatorId;
+  }
+
+  private getParticipantId(client: Socket): string | null {
+    if (client.data.participant) return client.data.participant.id;
+    return client.data.participantId || null;
+  }
+
+  private broadcastPollLaunched(
+    poolCode: string,
+    poll: {
+      id: string;
+      questionText: string;
+      type: string;
+      showResultsToParticipants: boolean;
+      options: { id: string; text: string; position: number }[];
+    },
+  ) {
+    this.server.to(`pool:${poolCode}`).emit('poll:launched', {
+      poll: {
+        id: poll.id,
+        questionText: poll.questionText,
+        type: poll.type,
+        showResultsToParticipants: poll.showResultsToParticipants,
+      },
+      options: poll.options,
+    });
+  }
+
+  private async broadcastDisplaySync(poolCode: string, poolId: string, creatorId: string) {
+    const poolRow = await this.prisma.pool.findUnique({ where: { id: poolId } });
+    if (!poolRow) return;
+
+    const poolSlice = {
+      lastQuestionMergeAt: poolRow.lastQuestionMergeAt?.toISOString() ?? null,
+      questionsSinceMerge: poolRow.questionsSinceMerge,
+    };
+
+    const publicItems = await this.questionsService.buildDisplayItems(poolId, false);
+    const adminItems = await this.questionsService.buildDisplayItems(poolId, true);
+    const roomName = `pool:${poolCode}`;
+    const sockets = await this.server.in(roomName).fetchSockets();
+
+    for (const s of sockets) {
+      const items = this.remoteIsPoolCreator(s, creatorId) ? adminItems : publicItems;
+      s.emit('questions:merged-sync', { displayItems: items, pool: poolSlice });
+    }
+  }
+
+  private async broadcastParticipantRoster(poolCode: string) {
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool) return;
+
+    const roomName = `pool:${poolCode}`;
+    const sockets = await this.server.in(roomName).fetchSockets();
+
+    let hostSocketCount = 0;
+    const namedDraft: { id: string; displayName: string }[] = [];
+    let anonymousCount = 0;
+
+    for (const remote of sockets) {
+      if (this.remoteIsPoolCreator(remote, pool.creatorId)) {
+        hostSocketCount += 1;
+      }
+
+      const data = remote.data as {
+        participant?: { id: string; displayName: string | null; isAnonymous: boolean };
+        user?: { id: string; name: string };
+      };
+
+      if (data.participant) {
+        const p = data.participant;
+        if (p.isAnonymous || !p.displayName) {
+          anonymousCount += 1;
+        } else {
+          namedDraft.push({ id: p.id, displayName: p.displayName });
+        }
+      } else if (data.user) {
+        namedDraft.push({ id: data.user.id, displayName: data.user.name });
+      } else {
+        anonymousCount += 1;
+      }
+    }
+
+    const seen = new Set<string>();
+    const named = namedDraft
+      .filter((n) => {
+        if (seen.has(n.id)) return false;
+        seen.add(n.id);
+        return true;
+      })
+      .filter((n) => n.id !== pool.creatorId);
+
+    const audienceConnected = Math.max(0, sockets.length - hostSocketCount);
+
+    this.server.to(roomName).emit('participants:live-count', { audienceConnected });
+
+    this.server.to(`${roomName}:admin`).emit('participants:roster', {
+      connectedTotal: sockets.length,
+      audienceConnected,
+      anonymousCount,
+      named,
+    });
+  }
+
+  emitToPool(poolCode: string, event: string, data: any) {
+    this.server.to(`pool:${poolCode}`).emit(event, data);
+  }
+
+  emitToAdmin(poolCode: string, event: string, data: any) {
+    this.server.to(`pool:${poolCode}:admin`).emit(event, data);
+  }
+}

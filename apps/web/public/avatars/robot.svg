@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="card" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="55%" stop-color="#172554"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="chassis" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f3f4f6"/>
+      <stop offset="100%" stop-color="#d1d5db"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="40" fill="url(#card)"/>
+  <rect x="60" y="72" width="136" height="136" rx="28" fill="url(#chassis)"/>
+  <rect x="92" y="40" width="72" height="28" rx="14" fill="#9ca3af"/>
+  <circle cx="128" cy="40" r="8" fill="#4ade80"/>
+  <circle cx="128" cy="40" r="3" fill="#bbf7d0" opacity="0.9"/>
+  <rect x="86" y="108" width="84" height="44" rx="16" fill="#111827"/>
+  <rect x="88" y="110" width="80" height="40" rx="14" fill="#0b1220"/>
+  <circle cx="108" cy="130" r="10" fill="#38bdf8"/>
+  <circle cx="148" cy="130" r="10" fill="#38bdf8"/>
+  <circle cx="105" cy="127" r="3" fill="#e0f2fe" opacity="0.5"/>
+  <circle cx="145" cy="127" r="3" fill="#e0f2fe" opacity="0.5"/>
+  <rect x="96" y="166" width="64" height="14" rx="7" fill="#9ca3af"/>
+</svg>

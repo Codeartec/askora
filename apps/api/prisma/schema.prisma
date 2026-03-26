@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  name         String
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  passwordHash String?  @map("password_hash")
+  googleId     String?  @unique @map("google_id")
+  avatarUrl    String?  @map("avatar_url")
+  avatarData   Bytes?   @map("avatar_data")
+  avatarMime   String?  @map("avatar_mime")
+  avatarUpdatedAt DateTime? @map("avatar_updated_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  pools        Pool[]
+  participants Participant[]
+
+  @@map("users")
+}
+
+model Pool {
+  id                    String    @id @default(uuid()) @db.Uuid
+  code                  String    @unique @db.VarChar(8)
+  title                 String
+  description           String?   @db.Text
+  genre                 String    @db.VarChar(50)
+  isPublic              Boolean   @default(true) @map("is_public")
+  accessKey             String?   @map("access_key")
+  status                String    @default("draft") @db.VarChar(20)
+  requireIdentification Boolean   @default(false) @map("require_identification")
+  customFilterRules     String?   @map("custom_filter_rules") @db.Text
+  createdAt             DateTime  @default(now()) @map("created_at")
+  openedAt              DateTime? @map("opened_at")
+  closedAt              DateTime? @map("closed_at")
+  questionsSinceMerge   Int       @default(0) @map("questions_since_merge")
+  lastQuestionMergeAt   DateTime? @map("last_question_merge_at")
+
+  creatorId String @map("creator_id") @db.Uuid
+  creator   User   @relation(fields: [creatorId], references: [id])
+
+  participants    Participant[]
+  questions       Question[]
+  questionClusters QuestionCluster[]
+  polls           Poll[]
+
+  @@map("pools")
+}
+
+model Participant {
+  id           String   @id @default(uuid()) @db.Uuid
+  displayName  String?  @map("display_name")
+  isAnonymous  Boolean  @default(true) @map("is_anonymous")
+  sessionToken String   @unique @map("session_token")
+  joinedAt     DateTime @default(now()) @map("joined_at")
+
+  poolId String @map("pool_id") @db.Uuid
+  pool   Pool   @relation(fields: [poolId], references: [id])
+
+  userId String? @map("user_id") @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id])
+
+  questions     Question[]
+  questionVotes QuestionVote[]
+  pollResponses PollResponse[]
+
+  @@unique([poolId, userId])
+  @@map("participants")
+}
+
+model Question {
+  id               String   @id @default(uuid()) @db.Uuid
+  originalText     String   @map("original_text") @db.Text
+  status           String   @default("active") @db.VarChar(20)
+  moderationStatus String   @default("approved") @map("moderation_status") @db.VarChar(30)
+  moderationReason String?  @map("moderation_reason") @db.Text
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  poolId        String  @map("pool_id") @db.Uuid
+  pool          Pool    @relation(fields: [poolId], references: [id])
+
+  participantId String @map("participant_id") @db.Uuid
+  participant   Participant @relation(fields: [participantId], references: [id])
+
+  clusterId String?          @map("cluster_id") @db.Uuid
+  cluster   QuestionCluster? @relation(fields: [clusterId], references: [id])
+
+  votes QuestionVote[]
+
+  @@map("questions")
+}
+
+model QuestionCluster {
+  id          String   @id @default(uuid()) @db.Uuid
+  unifiedText String   @map("unified_text") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  poolId String @map("pool_id") @db.Uuid
+  pool   Pool   @relation(fields: [poolId], references: [id])
+
+  questions Question[]
+  votes     QuestionVote[]
+
+  @@map("question_clusters")
+}
+
+model QuestionVote {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  participantId String      @map("participant_id") @db.Uuid
+  participant   Participant @relation(fields: [participantId], references: [id])
+
+  questionId String?   @map("question_id") @db.Uuid
+  question   Question? @relation(fields: [questionId], references: [id])
+
+  clusterId String?          @map("cluster_id") @db.Uuid
+  cluster   QuestionCluster? @relation(fields: [clusterId], references: [id])
+
+  @@unique([participantId, questionId])
+  @@unique([participantId, clusterId])
+  @@map("question_votes")
+}
+
+model Poll {
+  id                           String    @id @default(uuid()) @db.Uuid
+  questionText                 String    @map("question_text") @db.Text
+  type                         String    @db.VarChar(20)
+  status                       String    @default("draft") @db.VarChar(20)
+  showResultsToParticipants    Boolean   @default(false) @map("show_results_to_participants")
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  sentAt                       DateTime? @map("sent_at")
+  closedAt                     DateTime? @map("closed_at")
+
+  poolId String @map("pool_id") @db.Uuid
+  pool   Pool   @relation(fields: [poolId], references: [id])
+
+  options   PollOption[]
+  responses PollResponse[]
+
+  @@map("polls")
+}
+
+model PollOption {
+  id       String @id @default(uuid()) @db.Uuid
+  text     String @db.VarChar(500)
+  position Int
+
+  pollId String @map("poll_id") @db.Uuid
+  poll   Poll   @relation(fields: [pollId], references: [id])
+
+  responses PollResponse[]
+
+  @@map("poll_options")
+}
+
+model PollResponse {
+  id        String   @id @default(uuid()) @db.Uuid
+  freeText  String?  @map("free_text") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pollId String @map("poll_id") @db.Uuid
+  poll   Poll   @relation(fields: [pollId], references: [id])
+
+  participantId String      @map("participant_id") @db.Uuid
+  participant   Participant @relation(fields: [participantId], references: [id])
+
+  pollOptionId String?     @map("poll_option_id") @db.Uuid
+  pollOption   PollOption? @relation(fields: [pollOptionId], references: [id])
+
+  @@unique([pollId, participantId])
+  @@map("poll_responses")
+}

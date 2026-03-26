@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="card" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="55%" stop-color="#172554"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="horn" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c4b5fd"/>
+      <stop offset="50%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#60a5fa"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="40" fill="url(#card)"/>
+  <path d="M76 170c0-44 28-78 70-78s66 26 66 62c0 44-40 74-88 74-28 0-48-18-48-58z" fill="#e5e7eb"/>
+  <path d="M112 76l60-28-18 64z" fill="url(#horn)"/>
+  <path d="M118 82l44-20-12 42z" fill="#ddd6fe" opacity="0.5"/>
+  <circle cx="154" cy="132" r="8" fill="#0b1220"/>
+  <circle cx="151" cy="129" r="2.5" fill="#fff" opacity="0.35"/>
+  <path d="M136 146c10 8 26 8 36 0" fill="none" stroke="#0b1220" stroke-width="8" stroke-linecap="round"/>
+  <path d="M88 156c10 10 22 18 34 22" fill="none" stroke="url(#horn)" stroke-width="10" stroke-linecap="round"/>
+</svg>

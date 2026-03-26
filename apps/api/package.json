@@ -1,0 +1,50 @@
+{
+  "name": "@askora/api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main",
+    "start:prod": "node dist/main",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.17",
+    "@nestjs/config": "^4.0.3",
+    "@nestjs/core": "^11.1.17",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "^11.1.17",
+    "@nestjs/platform-socket.io": "^11.1.17",
+    "@nestjs/websockets": "^11.1.17",
+    "@prisma/client": "^6.19.2",
+    "bcryptjs": "^3.0.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "openai": "^6.32.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "passport-jwt": "^4.0.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "sharp": "^0.34.5",
+    "socket.io": "^4.8.3",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.16",
+    "@nestjs/schematics": "^11.0.9",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^25.5.0",
+    "@types/passport-google-oauth20": "^2.0.17",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/uuid": "^10.0.0",
+    "prisma": "^6.19.2",
+    "ts-loader": "^9.5.4",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="card" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="55%" stop-color="#172554"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="coat" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#ea580c"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="40" fill="url(#card)"/>
+  <path d="M48 84l56 40 24-44 24 44 56-40-20 116c-8 30-34 48-60 48s-52-18-60-48L48 84z" fill="url(#coat)"/>
+  <path d="M104 124l24-44 24 44-24 16-24-16z" fill="#fdba74"/>
+  <circle cx="96" cy="144" r="9" fill="#0b1220"/>
+  <circle cx="160" cy="144" r="9" fill="#0b1220"/>
+  <circle cx="98" cy="142" r="2.5" fill="#fff" opacity="0.4"/>
+  <circle cx="162" cy="142" r="2.5" fill="#fff" opacity="0.4"/>
+  <path d="M128 156l-10 10 10 10 10-10-10-10z" fill="#0b1220"/>
+  <path d="M88 172c12 18 28 26 40 26s28-8 40-26" fill="none" stroke="#0b1220" stroke-width="10" stroke-linecap="round"/>
+</svg>
