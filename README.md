@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.svg" alt="Askora" width="80" />
+
 # Askora
 
 ### Dale voz a tu audiencia
@@ -14,6 +16,13 @@ Plataforma de preguntas y respuestas en tiempo real para presentaciones, clases,
 
 ---
 
+<table>
+<tr>
+<td width="120" align="center">
+<img src="docs/askora_bot.png" alt="Askora Bot" width="100" />
+</td>
+<td>
+
 ## El problema
 
 En charlas, clases y eventos en vivo, la audiencia quiere preguntar pero los canales se saturan: el chat se pierde, las preguntas se repiten y el presentador no sabe cuáles priorizar. Las mejores preguntas quedan enterradas entre cientos de mensajes.
@@ -21,6 +30,10 @@ En charlas, clases y eventos en vivo, la audiencia quiere preguntar pero los can
 ## La solución
 
 **Askora** organiza las preguntas de tu audiencia en tiempo real. Los participantes envían preguntas, votan las que más les interesan, y la IA agrupa automáticamente las que son similares. El presentador ve un panel limpio con las preguntas más relevantes y puede lanzar encuestas rápidas, todo sin interrumpir el flujo del evento.
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -40,41 +53,18 @@ En charlas, clases y eventos en vivo, la audiencia quiere preguntar pero los can
 
 ## Capturas de pantalla
 
-<!-- TODO: Reemplazar estos placeholders con capturas reales de la aplicación -->
-
-> **Nota:** Agrega aquí capturas de pantalla o GIFs de la aplicación en funcionamiento.
-> Recomendado: HomePage, panel de gestión de pool, vista en vivo de Q&A, encuestas.
-
-```
-Ejemplo de estructura sugerida:
-
 ![Home](docs/screenshots/home.png)
 ![Pool Management](docs/screenshots/pool-manage.png)
-![Live Q&A](docs/screenshots/live-qa.png)
-![Polls](docs/screenshots/polls.png)
-```
+![Live Q&A1](docs/screenshots/live-qa_1.png)
+![Live Q&A2](docs/screenshots/live-qa_2.png)
+![QA MERGE](docs/screenshots/qa_merge.png)
+
 
 ---
 
 ## Arquitectura
 
-```mermaid
-graph TB
-    subgraph cubepath [CubePath VPS - Dokploy]
-        Web["React SPA<br/>(Puerto 3000)"]
-        API["NestJS API<br/>(Puerto 3001)"]
-        DB["PostgreSQL 16<br/>(Puerto 5432)"]
-    end
-
-    User["Audiencia / Presentador"]
-    LLM["Groq / OpenRouter<br/>(LLM externo)"]
-
-    User -->|"HTTP / WebSocket"| Web
-    Web -->|"/api/* proxy"| API
-    API -->|"Prisma ORM"| DB
-    API -->|"Socket.IO"| Web
-    API -->|"OpenAI SDK"| LLM
-```
+![Arquitectura](docs/screenshots/arquitectura.png)
 
 La aplicación se despliega como **3 servicios Docker** orquestados con Docker Compose:
 
@@ -123,7 +113,7 @@ Askora está desplegado en un **VPS de CubePath** utilizando **Dokploy** como pl
    docker compose up --build -d
    ```
 
-4. **Configuración de red** — Dokploy gestiona el reverse proxy (Traefik) y los certificados SSL, exponiendo la aplicación en `https://askora.cubepath.app`.
+4. **Configuración de red** — Dokploy gestiona el reverse proxy (Traefik) y los certificados SSL, exponiendo la aplicación en `[Tengo que completar esto cuando termine de desplegar]`.
 
 ### Servicios desplegados
 
