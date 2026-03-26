@@ -8,8 +8,7 @@ ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_WS_URL=$VITE_WS_URL
 
 COPY apps/web/package*.json ./
-COPY package-lock.json ./
-RUN npm ci
+RUN npm install
 
 COPY apps/web/ ./
 RUN npm run build
