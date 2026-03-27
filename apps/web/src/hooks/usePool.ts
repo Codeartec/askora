@@ -200,8 +200,15 @@ export function usePool(poolCode: string | null) {
       setMergeInProgress(false);
     });
 
-    socket.on('error', () => {
+    socket.on('error', (data: { message?: string }) => {
       setMergeInProgress(false);
+      if (data?.message === 'Unauthorized') {
+        const freshToken = localStorage.getItem('askora_token');
+        if (freshToken && socket.auth) {
+          (socket.auth as Record<string, unknown>).token = freshToken;
+          socket.disconnect().connect();
+        }
+      }
     });
 
     socket.on('question:flagged', (data: { question: Question; moderationStatus: string; reason: string }) => {

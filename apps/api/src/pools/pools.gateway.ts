@@ -42,7 +42,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const payload = this.jwtService.verify(auth.token);
         const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
         if (user) {
-          client.data = { user, authType: 'jwt' };
+          client.data = { ...client.data, user, authType: 'jwt' };
           this.logger.log(`User connected: ${user.email}`);
           return;
         }
@@ -52,15 +52,15 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
           where: { sessionToken: auth.sessionToken },
         });
         if (participant) {
-          client.data = { participant, authType: 'session' };
+          client.data = { ...client.data, participant, authType: 'session' };
           this.logger.log(`Participant connected: ${participant.id}`);
           return;
         }
       }
-      client.data = { authType: 'anonymous' };
+      client.data = { ...client.data, authType: 'anonymous' };
       this.logger.log(`Anonymous connection: ${client.id}`);
     } catch (err) {
-      client.data = { authType: 'anonymous' };
+      client.data = { ...client.data, authType: 'anonymous' };
       this.logger.warn(`Auth failed for ${client.id}, allowing as anonymous`);
     }
   }
@@ -192,7 +192,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { status: string },
   ) {
-    if (client.data.authType !== 'jwt') {
+    if (!(await this.ensureJwtAuth(client))) {
       client.emit('error', { message: 'Unauthorized' });
       return;
     }
@@ -315,7 +315,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { questionId: string; action: 'approve' | 'reject' },
   ) {
-    if (client.data.authType !== 'jwt') {
+    if (!(await this.ensureJwtAuth(client))) {
       client.emit('error', { message: 'Unauthorized' });
       return;
     }
@@ -358,7 +358,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleTriggerMerge(
     @ConnectedSocket() client: Socket,
   ) {
-    if (client.data.authType !== 'jwt') {
+    if (!(await this.ensureJwtAuth(client))) {
       client.emit('error', { message: 'Unauthorized' });
       return;
     }
@@ -393,7 +393,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       asDraft?: boolean;
     },
   ) {
-    if (client.data.authType !== 'jwt') {
+    if (!(await this.ensureJwtAuth(client))) {
       client.emit('error', { message: 'Unauthorized' });
       return;
     }
@@ -427,7 +427,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { pollId: string },
   ) {
-    if (client.data.authType !== 'jwt') return;
+    if (!(await this.ensureJwtAuth(client))) return;
     const poolCode = client.data.poolCode;
     const poolId = client.data.poolId;
     if (!poolCode || !poolId) return;
@@ -476,7 +476,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { pollId: string },
   ) {
-    if (client.data.authType !== 'jwt') return;
+    if (!(await this.ensureJwtAuth(client))) return;
     const poolCode = client.data.poolCode;
     const poolId = client.data.poolId;
     if (!poolCode || !poolId) return;
@@ -526,6 +526,21 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private resolveJwtUserId(client: Socket): string | undefined {
     return this.resolveJwtUserIdFromHandshake(client);
+  }
+
+  private async ensureJwtAuth(client: Socket): Promise<boolean> {
+    if (client.data?.authType === 'jwt' && client.data?.user) return true;
+    const token = client.handshake?.auth?.token as string | undefined;
+    if (!token) return false;
+    try {
+      const payload = this.jwtService.verify(token) as { sub: string };
+      const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+      if (user) {
+        client.data = { ...client.data, user, authType: 'jwt' };
+        return true;
+      }
+    } catch {}
+    return false;
   }
 
   private remoteIsPoolCreator(remote: { data?: any; handshake?: any }, creatorId: string): boolean {
