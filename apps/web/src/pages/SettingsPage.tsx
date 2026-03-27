@@ -17,6 +17,7 @@ import {
   rasterizeImageUrlToPngFile,
 } from '@/lib/avatar-crop';
 import { ArrowLeft } from 'lucide-react';
+import { LoaderCat } from '@/components/LoaderCat';
 
 const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/;
 
@@ -128,11 +129,7 @@ export function SettingsPage() {
   };
 
   if (isLoading || !user) {
-    return (
-      <div className="flex items-center justify-center min-h-[40vh]">
-        <p className="text-muted-foreground">{t('common.loading')}</p>
-      </div>
-    );
+    return <LoaderCat className="min-h-[40vh]" />;
   }
 
   return (

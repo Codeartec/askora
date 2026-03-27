@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Plus, UserPlus, MessageSquare, ChevronRight, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
+import { LoaderCat } from '@/components/LoaderCat';
 
 interface Pool {
   id: string;
@@ -80,7 +81,7 @@ export function DashboardPage() {
 
   let content: React.ReactNode;
   if (loading) {
-    content = <p className="text-muted-foreground">{t('common.loading')}</p>;
+    content = <LoaderCat className="py-16" />;
   } else if (createdPools.length === 0 && joinedPools.length === 0) {
     content = (
       <Card>

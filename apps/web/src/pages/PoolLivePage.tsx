@@ -10,6 +10,7 @@ import { usePool, displayItemKey } from '@/hooks/usePool';
 import api from '@/lib/api';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuthStore } from '@/stores/auth.store';
+import { LoaderCat } from '@/components/LoaderCat';
 
 type PollResultOpt = { id: string; text: string; responseCount?: number; _count?: { responses: number } };
 
@@ -104,7 +105,7 @@ export function PoolLivePage() {
   };
 
   if (joinStep === 'loading' || !poolInfo) {
-    return <p className="text-center py-16">{t('common.loading')}</p>;
+    return <LoaderCat className="py-16" />;
   }
 
   if (joinStep === 'identify') {
@@ -197,6 +198,9 @@ export function PoolLivePage() {
           )}
         </div>
       </div>
+      {displayPool.description ? (
+        <p className="text-sm text-muted-foreground">{displayPool.description}</p>
+      ) : null}
 
       {displayPool.status === 'active' && (
         <Card>

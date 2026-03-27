@@ -12,10 +12,11 @@ import { CreatePoolPage } from '@/pages/CreatePoolPage';
 import { PoolManagePage } from '@/pages/PoolManagePage';
 import { PoolLivePage } from '@/pages/PoolLivePage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { LoaderCat } from '@/components/LoaderCat';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuthStore();
-  if (isLoading) return <div className="flex items-center justify-center min-h-[60vh]"><p>Loading...</p></div>;
+  if (isLoading) return <LoaderCat className="min-h-[60vh]" />;
   if (!token) return <Navigate to="/login" />;
   return <>{children}</>;
 }

@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Copy, Play, Square, Users, MessageSquare, ArrowLeft, Wifi, WifiOff, ShieldAlert, Check, X, Sparkles, ClipboardList, Plus, Send, PanelLeft, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Copy, Play, Square, Users, MessageSquare, ArrowLeft, Wifi, WifiOff, ShieldAlert, Check, X, Sparkles, ClipboardList, Plus, Send, PanelLeft, Trash2, Eye, EyeOff, ChevronDown, Loader2 } from 'lucide-react';
 import { usePool, displayItemKey, type DisplayItem } from '@/hooks/usePool';
 import { Input } from '@/components/ui/input';
 import api from '@/lib/api';
+import { LoaderCat } from '@/components/LoaderCat';
 
 type DraftPoll = {
   id: string;
@@ -46,6 +48,7 @@ export function PoolManagePage() {
   const [poolData, setPoolData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [copiedAccessKey, setCopiedAccessKey] = useState(false);
   const [showAccessKey, setShowAccessKey] = useState(false);
   const [quickPollText, setQuickPollText] = useState('');
@@ -56,6 +59,8 @@ export function PoolManagePage() {
   const [participantSearch, setParticipantSearch] = useState('');
   const [draftPolls, setDraftPolls] = useState<DraftPoll[]>([]);
   const [completedPolls, setCompletedPolls] = useState<CompletedPoll[]>([]);
+  const [isMergeHighlightActive, setIsMergeHighlightActive] = useState(false);
+  const mergeHighlightTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     api.get(`/pools/${id}`).then(({ data }) => {
@@ -75,6 +80,7 @@ export function PoolManagePage() {
     updateStatus,
     moderateQuestion,
     triggerMerge,
+    mergeInProgress,
     createPoll,
     launchPoll,
     closePoll,
@@ -114,8 +120,35 @@ export function PoolManagePage() {
   const lastMergeLabel = useMemo(() => {
     const ts = pool?.lastQuestionMergeAt ?? poolData?.lastQuestionMergeAt;
     if (!ts) return t('pool.lastMergeNever');
-    return t('pool.lastMergeReview', { datetime: new Date(ts).toLocaleString() });
+    return t('pool.lastMergeReview', {
+      datetime: new Date(ts).toLocaleString(undefined, {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }),
+    });
   }, [pool?.lastQuestionMergeAt, poolData?.lastQuestionMergeAt, t]);
+  useEffect(() => {
+    return () => {
+      if (mergeHighlightTimeoutRef.current !== null) {
+        globalThis.clearTimeout(mergeHighlightTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const startMergeHighlight = useCallback(() => {
+    setIsMergeHighlightActive(true);
+    if (mergeHighlightTimeoutRef.current !== null) {
+      globalThis.clearTimeout(mergeHighlightTimeoutRef.current);
+    }
+    mergeHighlightTimeoutRef.current = globalThis.setTimeout(() => {
+      setIsMergeHighlightActive(false);
+    }, 1200);
+  }, []);
+
+  const handleAiMergeClick = useCallback(() => {
+    startMergeHighlight();
+    triggerMerge();
+  }, [startMergeHighlight, triggerMerge]);
 
   useEffect(() => {
     if (!participantsPanelOpen) setParticipantSearch('');
@@ -141,22 +174,63 @@ export function PoolManagePage() {
   const participantsCardCount =
     participantRoster !== null ? participantRoster.audienceConnected : liveAudienceCount;
 
+  const copyToClipboard = async (text: string) => {
+    if (!text) return false;
+    try {
+      const n = globalThis.navigator;
+      if (n?.clipboard?.writeText) {
+        await n.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // fallback below
+    }
+    try {
+      const d = globalThis.document;
+      const el = d.createElement('textarea');
+      el.value = text;
+      el.setAttribute('readonly', '');
+      el.style.position = 'fixed';
+      el.style.top = '-9999px';
+      d.body.appendChild(el);
+      el.focus();
+      el.select();
+      const ok = d.execCommand('copy');
+      el.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
   const copyCode = () => {
     if (!displayPool) return;
-    navigator.clipboard.writeText(displayPool.code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void (async () => {
+      const ok = await copyToClipboard(displayPool.code);
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    })();
   };
 
   const copyAccessKey = () => {
-    const key = typeof displayPool?.accessKey === 'string' ? displayPool.accessKey : '';
+    // WS payload does not always include privacy/accessKey fields, so prefer HTTP payload when available.
+    const key =
+      typeof poolData?.accessKey === 'string'
+        ? poolData.accessKey
+        : typeof displayPool?.accessKey === 'string'
+          ? displayPool.accessKey
+          : '';
     if (!key) return;
-    navigator.clipboard.writeText(key);
-    setCopiedAccessKey(true);
-    setTimeout(() => setCopiedAccessKey(false), 2000);
+    void (async () => {
+      const ok = await copyToClipboard(key);
+      if (!ok) return;
+      setCopiedAccessKey(true);
+      setTimeout(() => setCopiedAccessKey(false), 2000);
+    })();
   };
 
-  if (loading || !displayPool) return <p>{t('common.loading')}</p>;
+  if (loading || !displayPool) return <LoaderCat className="py-16" />;
 
   const statusVariant = displayPool.status === 'active' ? 'success' as const : displayPool.status === 'closed' ? 'secondary' as const : 'outline' as const;
   const liveChannelOk = displayPool.status === 'active' && connected;
@@ -174,6 +248,40 @@ export function PoolManagePage() {
       : typeof displayPool.accessKey === 'string'
         ? displayPool.accessKey
         : '';
+  const customFilterRulesText =
+    typeof poolData?.customFilterRules === 'string'
+      ? poolData.customFilterRules
+      : typeof displayPool?.customFilterRules === 'string'
+        ? displayPool.customFilterRules
+        : '';
+  const requireIdentification =
+    typeof poolData?.requireIdentification === 'boolean'
+      ? poolData.requireIdentification
+      : typeof displayPool?.requireIdentification === 'boolean'
+        ? displayPool.requireIdentification
+        : false;
+
+  const statusCardClass =
+    displayPool.status === 'active'
+      ? 'bg-emerald-50/40 border-emerald-200/60 dark:bg-emerald-950/10 dark:border-emerald-900/30'
+      : displayPool.status === 'draft'
+        ? 'bg-amber-50/40 border-amber-200/60 dark:bg-amber-950/10 dark:border-amber-900/30'
+        : 'bg-muted/30 border-border';
+
+  const shareOrigin = globalThis.window?.location?.origin;
+  const shareUrl = shareOrigin
+    ? `${shareOrigin}/join?code=${encodeURIComponent(displayPool.code)}`
+    : '';
+
+  const copyShareLink = () => {
+    if (!shareUrl) return;
+    void (async () => {
+      const ok = await copyToClipboard(shareUrl);
+      if (!ok) return;
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    })();
+  };
 
   return (
     <div className="space-y-6">
@@ -217,32 +325,61 @@ export function PoolManagePage() {
                   className="h-7 w-7"
                   aria-label={t('pool.accessKey')}
                 >
-                  <Copy className="h-4 w-4" />
+                  {copiedAccessKey ? (
+                    <Check className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
                 </Button>
-                {copiedAccessKey && <span className="text-xs text-green-600">Copied!</span>}
               </div>
             )}
           </div>
-          {displayPool.description && <p className="text-muted-foreground mt-1">{displayPool.description}</p>}
-          <p className="text-xs text-muted-foreground mt-2">{lastMergeLabel}</p>
         </div>
       </div>
 
+      {displayPool.description && (
+        <Card className="border-border bg-muted/20">
+          <CardContent className="p-4">
+            <p className="text-sm leading-relaxed text-muted-foreground">{displayPool.description}</p>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-4">
-        <Card className="flex h-full min-h-0 flex-col">
+        <Card className="flex h-full min-h-0 flex-col bg-linear-to-br from-violet-50/80 to-white border-border shadow-md dark:from-violet-950/20 dark:to-card">
           <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
             <p className="text-sm text-muted-foreground">{t('pool.code')}</p>
             <div className="flex items-center justify-center gap-2">
               <span className="text-2xl font-mono font-bold tracking-widest">{displayPool.code}</span>
               <Button variant="ghost" size="icon" onClick={copyCode} className="h-8 w-8">
-                <Copy className="h-4 w-4" />
+                {copied ? (
+                  <Check className="h-4 w-4 text-green-600" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
               </Button>
             </div>
-            {copied && <p className="text-xs text-green-600">Copied!</p>}
+            <div className="mt-2 flex items-center justify-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={copyShareLink}
+                disabled={copiedLink}
+                className="gap-1.5 h-10 sm:h-9"
+              >
+                {copiedLink ? (
+                  <Check className="h-3.5 w-3.5 text-green-600" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+                {copiedLink ? t('pool.linkCopied') : t('pool.copyLink')}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="flex h-full min-h-0 flex-col">
+        <Card className={`flex h-full min-h-0 flex-col ${statusCardClass}`}>
           <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
             <p className="text-sm text-muted-foreground">{t('pool.status')}</p>
             <div className="flex justify-center gap-2">
@@ -265,7 +402,7 @@ export function PoolManagePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex h-full min-h-0 flex-col">
+        <Card className="flex h-full min-h-0 flex-col border-border">
           <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
             <p className="text-sm text-muted-foreground">{t('dashboard.participants')}</p>
             <div className="flex items-center justify-center gap-1">
@@ -276,7 +413,7 @@ export function PoolManagePage() {
               type="button"
               variant="outline"
               size="sm"
-              className="gap-1.5 w-full"
+              className="gap-1.5 w-full h-10 sm:h-9"
               onClick={() => setParticipantsPanelOpen(true)}
             >
               <PanelLeft className="h-4 w-4" />
@@ -285,7 +422,7 @@ export function PoolManagePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex h-full min-h-0 flex-col">
+        <Card className="flex h-full min-h-0 flex-col border-border">
           <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
             <p className="text-sm text-muted-foreground">{t('dashboard.questions')}</p>
             <div className="flex items-center justify-center gap-1">
@@ -294,6 +431,43 @@ export function PoolManagePage() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      <div className="flex justify-end">
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button type="button" variant="outline" className="gap-2">
+              <ShieldAlert className="h-4 w-4" />
+              {t('pool.viewCustomRules')}
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ShieldAlert className="h-5 w-5" />
+                {t('pool.customRules')}
+              </DialogTitle>
+              <DialogDescription>{t('pool.customRulesDialogDescription')}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="inline-flex flex-wrap items-center gap-2">
+                <span className="text-sm text-muted-foreground">{t('pool.requireId')}</span>
+                <Badge variant={requireIdentification ? 'success' : 'secondary'}>
+                  {requireIdentification ? t('common.yes') : t('common.no')}
+                </Badge>
+              </div>
+              {customFilterRulesText.trim() === '' ? (
+                <p className="text-sm text-muted-foreground">{t('pool.customRulesEmpty')}</p>
+              ) : (
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <pre className="whitespace-pre-wrap wrap-break-word text-sm text-foreground/90">
+                    {customFilterRulesText}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {flaggedQuestions.length > 0 && (
@@ -317,9 +491,6 @@ export function PoolManagePage() {
                       {t('question.reason')}: {q.moderationReason}
                     </p>
                   )}
-                  <Badge variant={q.moderationStatus === 'flagged_standard' ? 'destructive' : 'warning'} className="mt-1 text-[10px]">
-                    {q.moderationStatus}
-                  </Badge>
                 </div>
                 <div className="flex gap-1">
                   <Button size="sm" variant="outline" onClick={() => moderateQuestion(q.id, 'approve')} className="h-8 w-8 p-0">
@@ -335,7 +506,7 @@ export function PoolManagePage() {
         </Card>
       )}
 
-      <Card>
+      <Card className="border-border border-l-4 border-l-primary/70">
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-1.5">
@@ -349,7 +520,7 @@ export function PoolManagePage() {
               size="sm"
               variant="outline"
               onClick={() => setShowPollForm(!showPollForm)}
-              className="gap-1.5 shrink-0 self-start sm:self-auto"
+              className="gap-1.5 shrink-0 self-start sm:self-auto h-10 sm:h-9"
             >
               {showPollForm ? (
                 t('common.cancel')
@@ -409,11 +580,7 @@ export function PoolManagePage() {
             </ul>
           </CardContent>
         )}
-        {draftPolls.length === 0 && !showPollForm && !activePoll && !pollResults && (
-          <CardContent className="border-t border-border pt-4">
-            <p className="text-sm text-muted-foreground">{t('quickPoll.draftsEmpty')}</p>
-          </CardContent>
-        )}
+        {/* Intentionally hide the "empty drafts" block to reduce vertical noise. */}
         {showPollForm && (
           <CardContent className="space-y-3 border-t border-border pt-4">
             <div className="space-y-2">
@@ -595,74 +762,108 @@ export function PoolManagePage() {
           </CardContent>
         )}
 
-        <CardContent className="border-t border-border pt-4">
-          <p className="text-sm font-medium text-muted-foreground">{t('quickPoll.completedSection')}</p>
-          {completedPolls.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">{t('quickPoll.completedEmpty')}</p>
-          ) : (
-            <ul className="mt-3 space-y-2">
-              {completedPolls.map((hp) => {
-                const total = pollTotalResponses(hp);
-                return (
-                  <li key={hp.id}>
-                    <details className="group rounded-lg border border-border bg-muted/20">
-                      <summary className="flex cursor-pointer list-none flex-wrap items-baseline justify-between gap-2 px-3 py-2.5 text-sm [&::-webkit-details-marker]:hidden">
-                        <span className="min-w-0 flex-1 font-medium leading-snug">{hp.questionText}</span>
-                        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                          {t('quickPoll.closedAtLabel', {
-                            datetime: new Date(hp.closedAt).toLocaleString(),
-                          })}
-                        </span>
-                      </summary>
-                      <div className="border-t border-border px-3 pb-3 pt-2">
-                        <p className="text-xs text-muted-foreground">
-                          {t('quickPoll.totalResponses', { count: total })}
-                        </p>
-                        {Array.isArray(hp.options) && hp.options.length > 0 && (
-                          <ul className="mt-3 space-y-3 text-sm">
-                            {hp.options.map((opt: PollResultOpt) => {
-                              const n = pollOptionCount(opt);
-                              const pct = total > 0 ? (n / total) * 100 : 0;
-                              return (
-                                <li key={opt.id} className="space-y-1">
-                                  <div className="flex justify-between gap-2">
-                                    <span className="text-foreground/90">{opt.text}</span>
-                                    <span className="shrink-0 font-medium tabular-nums">{n}</span>
-                                  </div>
-                                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                                    <div
-                                      className="h-full rounded-full bg-primary/50 transition-[width]"
-                                      style={{ width: `${pct}%` }}
-                                    />
-                                  </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </div>
-                    </details>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </CardContent>
+        {completedPolls.length > 0 && (
+          <CardContent className="border-t border-border pt-4">
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm [&::-webkit-details-marker]:hidden">
+                <span className="font-medium text-muted-foreground">
+                  {t('quickPoll.completedSection')}
+                </span>
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Badge variant="secondary" className="text-[10px] font-normal">
+                    {completedPolls.length}
+                  </Badge>
+                  <span className="underline-offset-2 group-open:underline">{t('common.view')}</span>
+                  <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden />
+                </span>
+              </summary>
+              <div className="mt-3">
+                <ul className="space-y-2">
+                  {completedPolls.map((hp) => {
+                    const total = pollTotalResponses(hp);
+                    return (
+                      <li key={hp.id}>
+                        <details className="group rounded-lg border border-border bg-muted/20">
+                          <summary className="flex cursor-pointer list-none flex-wrap items-baseline justify-between gap-2 px-3 py-2.5 text-sm [&::-webkit-details-marker]:hidden">
+                            <span className="min-w-0 flex-1 font-medium leading-snug">{hp.questionText}</span>
+                            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                              {t('quickPoll.closedAtLabel', {
+                                datetime: new Date(hp.closedAt).toLocaleString(),
+                              })}
+                            </span>
+                          </summary>
+                          <div className="border-t border-border px-3 pb-3 pt-2">
+                            <p className="text-xs text-muted-foreground">
+                              {t('quickPoll.totalResponses', { count: total })}
+                            </p>
+                            {Array.isArray(hp.options) && hp.options.length > 0 && (
+                              <ul className="mt-3 space-y-3 text-sm">
+                                {hp.options.map((opt: PollResultOpt) => {
+                                  const n = pollOptionCount(opt);
+                                  const pct = total > 0 ? (n / total) * 100 : 0;
+                                  return (
+                                    <li key={opt.id} className="space-y-1">
+                                      <div className="flex justify-between gap-2">
+                                        <span className="text-foreground/90">{opt.text}</span>
+                                        <span className="shrink-0 font-medium tabular-nums">{n}</span>
+                                      </div>
+                                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                                        <div
+                                          className="h-full rounded-full bg-primary/50 transition-[width]"
+                                          style={{ width: `${pct}%` }}
+                                        />
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                        </details>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </details>
+          </CardContent>
+        )}
       </Card>
 
-      <Card>
+      <Card
+        className={[
+          'border-border transition-colors duration-700 motion-reduce:transition-none',
+          isMergeHighlightActive
+            ? 'border-primary/50 bg-primary/3 shadow-[0_0_0_1px_hsl(var(--primary)/0.12)] motion-safe:animate-pulse'
+            : '',
+        ].join(' ')}
+      >
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle className="text-lg flex items-center gap-2">
               <MessageSquare className="h-5 w-5" />
               {t('dashboard.questions')} ({displayItems.length})
             </CardTitle>
-            {displayPool.status === 'active' && displayItems.length >= 2 && (
-              <Button size="sm" variant="outline" onClick={triggerMerge} className="gap-1.5">
-                <Sparkles className="h-4 w-4" />
-                AI Merge
-              </Button>
-            )}
+            <div className="ml-auto flex items-center gap-2">
+              <p className="text-xs text-muted-foreground">{lastMergeLabel}</p>
+              {displayPool.status === 'active' && displayItems.length >= 2 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleAiMergeClick}
+                  disabled={mergeInProgress}
+                  aria-busy={mergeInProgress}
+                  className="gap-1.5 min-w-30"
+                >
+                  {mergeInProgress ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                  ) : (
+                    <Sparkles className="h-4 w-4 shrink-0" aria-hidden />
+                  )}
+                  {mergeInProgress ? t('pool.aiMergeRunning') : t('pool.aiMerge')}
+                </Button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -696,8 +897,14 @@ export function PoolManagePage() {
                       </div>
                       {item.kind === 'cluster' && item.sources && item.sources.length > 0 && (
                         <details className="mt-2 group">
-                          <summary className="text-xs text-muted-foreground cursor-pointer list-none flex items-center gap-1 [&::-webkit-details-marker]:hidden">
-                            <span className="underline-offset-2 group-open:underline">{t('question.mergedSourcesToggle')}</span>
+                          <summary className="text-xs cursor-pointer list-none flex items-center gap-1.5 rounded-md -mx-1 px-1 py-1 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground [&::-webkit-details-marker]:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                            <ChevronDown
+                              className="h-3.5 w-3.5 shrink-0 opacity-80 transition-transform duration-200 group-open:rotate-180"
+                              aria-hidden
+                            />
+                            <span className="font-medium underline-offset-2 decoration-primary/60 group-open:underline">
+                              {t('question.mergedSourcesToggle')}
+                            </span>
                           </summary>
                           <ul className="mt-2 space-y-2 border-l-2 border-border pl-3" aria-label={t('question.mergedSources')}>
                             {item.sources.map((s) => (

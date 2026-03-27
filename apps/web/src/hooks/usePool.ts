@@ -93,15 +93,18 @@ export function usePool(poolCode: string | null) {
   const [pollResults, setPollResults] = useState<any>(null);
   const [participantRoster, setParticipantRoster] = useState<ParticipantRoster | null>(null);
   const [pollLibraryRevision, setPollLibraryRevision] = useState(0);
+  const [mergeInProgress, setMergeInProgress] = useState(false);
 
   useEffect(() => {
     if (!poolCode) {
       setParticipantRoster(null);
       setLiveAudienceCount(0);
       setPollLibraryRevision(0);
+      setMergeInProgress(false);
       return;
     }
 
+    setMergeInProgress(false);
     setParticipantRoster(null);
     setLiveAudienceCount(0);
     setActivePoll(null);
@@ -189,8 +192,17 @@ export function usePool(poolCode: string | null) {
               }
             : p,
         );
+        setMergeInProgress(false);
       },
     );
+
+    socket.on('llm:merge-completed', () => {
+      setMergeInProgress(false);
+    });
+
+    socket.on('error', () => {
+      setMergeInProgress(false);
+    });
 
     socket.on('question:flagged', (data: { question: Question; moderationStatus: string; reason: string }) => {
       setFlaggedQuestions((prev) => [data.question, ...prev]);
@@ -269,7 +281,9 @@ export function usePool(poolCode: string | null) {
   }, []);
 
   const triggerMerge = useCallback(() => {
-    socketRef.current?.emit('llm:trigger-merge', {});
+    if (!socketRef.current) return;
+    setMergeInProgress(true);
+    socketRef.current.emit('llm:trigger-merge', {});
   }, []);
 
   const createPoll = useCallback(
@@ -314,7 +328,7 @@ export function usePool(poolCode: string | null) {
     });
   }, [displayItems, voteCounts]);
 
-  return {
+    return {
     connected,
     pool,
     displayItems: sortedDisplayItems,
@@ -326,6 +340,7 @@ export function usePool(poolCode: string | null) {
     activePoll,
     pollResults,
     pollLibraryRevision,
+    mergeInProgress,
     submitQuestion,
     voteDisplayItem,
     updateStatus,

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Ticket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,9 @@ import api from '@/lib/api';
 export function JoinPoolPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const inputRef = useRef<HTMLInputElement>(null);
+  const autoJoinAttemptedRef = useRef<string | null>(null);
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,6 +20,14 @@ export function JoinPoolPage() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const raw = params.get('code');
+    const next = (raw ?? '').trim().toUpperCase();
+    if (!next) return;
+    setCode((prev) => (prev.trim() === '' ? next : prev));
+  }, [location.search]);
 
   const handleJoin = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -37,6 +47,14 @@ export function JoinPoolPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const c = code.trim().toUpperCase();
+    if (c.length !== 6) return;
+    if (autoJoinAttemptedRef.current === c) return;
+    autoJoinAttemptedRef.current = c;
+    void handleJoin({ preventDefault: () => {} } as any);
+  }, [code]);
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-10 md:py-16">
