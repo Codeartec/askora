@@ -73,6 +73,7 @@
     "rosterLoading": "Sincronizando lista…",
     "rosterEmptyNamed": "No hay participantes con nombre en este momento.",
     "rosterNoMatches": "Ningún nombre coincide con la búsqueda.",
+    "hostBadge": "Anfitrión",
     "lastMergeReview": "Última revisión de merge: {{datetime}}",
     "lastMergeNever": "Aún no hubo revisión de merge",
     "aiMerge": "Fusión IA",

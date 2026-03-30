@@ -73,6 +73,7 @@
     "rosterLoading": "Syncing list…",
     "rosterEmptyNamed": "No named participants right now.",
     "rosterNoMatches": "No names match your search.",
+    "hostBadge": "Host",
     "lastMergeReview": "Last merge review: {{datetime}}",
     "lastMergeNever": "No merge review yet",
     "aiMerge": "AI Merge",

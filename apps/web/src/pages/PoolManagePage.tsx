@@ -167,8 +167,13 @@ export function PoolManagePage() {
   const filteredNamedParticipants = useMemo(() => {
     if (!participantRoster) return [];
     const q = participantSearch.trim().toLowerCase();
-    if (!q) return participantRoster.named;
-    return participantRoster.named.filter((n) => n.displayName.toLowerCase().includes(q));
+    const filtered = q
+      ? participantRoster.named.filter((n) => n.displayName.toLowerCase().includes(q))
+      : participantRoster.named;
+    return [...filtered].sort((a, b) => {
+      if (a.isHost !== b.isHost) return a.isHost ? -1 : 1;
+      return a.displayName.localeCompare(b.displayName);
+    });
   }, [participantRoster, participantSearch]);
 
   const participantsCardCount =
@@ -988,8 +993,21 @@ export function PoolManagePage() {
                       {participantRoster.named.length > 0 && filteredNamedParticipants.length > 0 && (
                         <ul className="divide-y divide-border">
                           {filteredNamedParticipants.map((n) => (
-                            <li key={n.id} className="px-3 py-2.5 text-sm">
-                              {n.displayName}
+                            <li
+                              key={n.id}
+                              className={[
+                                'flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm',
+                                n.isHost
+                                  ? 'border-l-2 border-l-primary/50 bg-muted/40'
+                                  : '',
+                              ].join(' ')}
+                            >
+                              <span className="min-w-0 flex-1 font-medium">{n.displayName}</span>
+                              {n.isHost && (
+                                <Badge variant="secondary" className="shrink-0 text-[10px] font-normal">
+                                  {t('pool.hostBadge')}
+                                </Badge>
+                              )}
                             </li>
                           ))}
                         </ul>

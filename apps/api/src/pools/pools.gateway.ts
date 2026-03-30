@@ -602,11 +602,12 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const sockets = await this.server.in(roomName).fetchSockets();
 
     let hostSocketCount = 0;
-    const namedDraft: { id: string; displayName: string }[] = [];
+    const namedDraft: { id: string; displayName: string; isHost: boolean }[] = [];
     let anonymousCount = 0;
 
     for (const remote of sockets) {
-      if (this.remoteIsPoolCreator(remote, pool.creatorId)) {
+      const isHost = this.remoteIsPoolCreator(remote, pool.creatorId);
+      if (isHost) {
         hostSocketCount += 1;
       }
 
@@ -620,23 +621,39 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (p.isAnonymous || !p.displayName) {
           anonymousCount += 1;
         } else {
-          namedDraft.push({ id: p.id, displayName: p.displayName });
+          namedDraft.push({ id: p.id, displayName: p.displayName, isHost });
         }
       } else if (data.user) {
-        namedDraft.push({ id: data.user.id, displayName: data.user.name });
+        namedDraft.push({ id: data.user.id, displayName: data.user.name, isHost });
       } else {
         anonymousCount += 1;
       }
     }
 
-    const seen = new Set<string>();
-    const named = namedDraft
-      .filter((n) => {
-        if (seen.has(n.id)) return false;
-        seen.add(n.id);
-        return true;
-      })
-      .filter((n) => n.id !== pool.creatorId);
+    const byId = new Map<string, { id: string; displayName: string; isHost: boolean }>();
+    for (const n of namedDraft) {
+      const prev = byId.get(n.id);
+      if (!prev) {
+        byId.set(n.id, n);
+      } else {
+        byId.set(n.id, { ...prev, isHost: prev.isHost || n.isHost });
+      }
+    }
+
+    let named = [...byId.values()];
+
+    if (hostSocketCount > 0 && !named.some((n) => n.isHost)) {
+      named.unshift({
+        id: pool.creatorId,
+        displayName: pool.creator.name,
+        isHost: true,
+      });
+    }
+
+    named.sort((a, b) => {
+      if (a.isHost !== b.isHost) return a.isHost ? -1 : 1;
+      return a.displayName.localeCompare(b.displayName);
+    });
 
     const audienceConnected = Math.max(0, sockets.length - hostSocketCount);
 

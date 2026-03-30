@@ -65,7 +65,7 @@ export interface ParticipantRoster {
   connectedTotal: number;
   audienceConnected: number;
   anonymousCount: number;
-  named: Array<{ id: string; displayName: string }>;
+  named: Array<{ id: string; displayName: string; isHost: boolean }>;
 }
 
 export function displayItemKey(item: DisplayItem): string {
