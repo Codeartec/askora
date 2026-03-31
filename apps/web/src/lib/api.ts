@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '@/stores/auth.store';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -30,9 +31,12 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       const hadAuth = requestHadAuthorization(error.config);
-      localStorage.removeItem('askora_token');
+      // Keep state consistent and avoid hard reloads (makes debugging impossible).
+      useAuthStore.getState().logout();
       if (hadAuth) {
-        globalThis.location.href = '/login';
+        const url = '/login?reason=session_expired';
+        globalThis.history.pushState({}, '', url);
+        globalThis.dispatchEvent(new PopStateEvent('popstate'));
       }
     }
     return Promise.reject(error);
