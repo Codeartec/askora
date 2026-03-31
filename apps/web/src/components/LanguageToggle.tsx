@@ -1,29 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 
-function FlagUS(props: Readonly<React.SVGProps<SVGSVGElement>>) {
-  return (
-    <svg viewBox="0 0 64 48" aria-hidden focusable="false" {...props}>
-      <rect width="64" height="48" fill="#b22234" />
-      <rect y="4" width="64" height="4" fill="#fff" />
-      <rect y="12" width="64" height="4" fill="#fff" />
-      <rect y="20" width="64" height="4" fill="#fff" />
-      <rect y="28" width="64" height="4" fill="#fff" />
-      <rect y="36" width="64" height="4" fill="#fff" />
-      <rect y="44" width="64" height="4" fill="#fff" />
-      <rect width="28" height="20" fill="#3c3b6e" />
-    </svg>
-  );
-}
-
-function FlagES(props: Readonly<React.SVGProps<SVGSVGElement>>) {
-  return (
-    <svg viewBox="0 0 64 48" aria-hidden focusable="false" {...props}>
-      <rect width="64" height="48" fill="#aa151b" />
-      <rect y="12" width="64" height="24" fill="#f1bf00" />
-    </svg>
-  );
-}
+const FLAG_EN = '/flags/english_flag.svg';
+const FLAG_ES = '/flags/spanish_flag.svg';
 
 export function LanguageToggle() {
   const { i18n } = useTranslation();
@@ -42,11 +21,14 @@ export function LanguageToggle() {
       aria-label={isEs ? 'Cambiar idioma a inglés' : 'Switch language to Spanish'}
       title={nextLabel}
     >
-      {isEs ? (
-        <FlagUS className="h-4 w-4 shrink-0 rounded-[3px]" />
-      ) : (
-        <FlagES className="h-4 w-4 shrink-0 rounded-[3px]" />
-      )}
+      <img
+        src={isEs ? FLAG_EN : FLAG_ES}
+        alt=""
+        width={16}
+        height={16}
+        decoding="async"
+        className="h-4 w-4 shrink-0 rounded-[3px] object-cover ring-1 ring-border/40"
+      />
       <span aria-hidden className="text-xs font-medium leading-none">
         {nextLabel}
       </span>
