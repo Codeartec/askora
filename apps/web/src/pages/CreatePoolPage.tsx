@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { FileText, Eye, Users, Shield, type LucideIcon } from 'lucide-react';
@@ -114,7 +114,7 @@ export function CreatePoolPage() {
 
   const update = (field: string, value: unknown) => setForm((f) => ({ ...f, [field]: value }));
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: { preventDefault: () => void }) => {
     e.preventDefault();
     setLoading(true);
     setError('');
