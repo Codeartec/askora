@@ -80,8 +80,18 @@
   animation: aurora-drift-c 26s ease-in-out infinite alternate;
 }
 
+html {
+  overflow-x: clip;
+}
+
 body {
   font-family: system-ui, -apple-system, sans-serif;
   background-color: var(--color-background);
   color: var(--color-foreground);
+  overflow-x: clip;
+  min-height: 100%;
+}
+
+#root {
+  min-height: 100%;
 }

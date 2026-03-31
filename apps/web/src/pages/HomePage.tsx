@@ -11,17 +11,18 @@ export function HomePage() {
 
   return (
     <div className="relative isolate space-y-16">
+      {/* Full-viewport background: main uses max-w-5xl, so absolute layers here would not span the screen */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-6 bottom-0 inset-x-0 w-full -z-10 overflow-hidden md:-top-8"
+        className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
       >
+        <div className="absolute -top-6 left-0 right-0 h-[min(75vh,560px)] rounded-b-[2rem] bg-[radial-gradient(ellipse_80%_60%_at_50%_0%,color-mix(in_srgb,var(--color-primary)_6%,transparent),transparent_65%)] md:-top-8" />
         <div className="absolute -top-24 left-[10%] h-[min(55vh,420px)] w-[min(90vw,520px)] rounded-full bg-[color-mix(in_srgb,var(--color-primary)_12%,transparent)] blur-3xl animate-aurora-a" />
         <div className="absolute top-[20%] -right-[10%] h-[min(45vh,360px)] w-[min(80vw,440px)] rounded-full bg-teal-500/10 blur-3xl animate-aurora-b" />
-        <div className="absolute bottom-0 left-[25%] h-[min(40vh,320px)] w-[min(70vw,380px)] rounded-full bg-[color-mix(in_srgb,var(--color-primary)_8%,transparent)] blur-3xl animate-aurora-c" />
+        <div className="absolute bottom-[15%] left-[25%] h-[min(40vh,320px)] w-[min(70vw,380px)] rounded-full bg-[color-mix(in_srgb,var(--color-primary)_8%,transparent)] blur-3xl animate-aurora-c" />
       </div>
 
       <section className="relative py-14 md:py-20">
-        <div className="absolute -top-6 inset-x-0 bottom-0 -mx-4 rounded-3xl bg-[radial-gradient(ellipse_80%_60%_at_50%_0%,color-mix(in_srgb,var(--color-primary)_6%,transparent),transparent_65%)] pointer-events-none md:-top-8" aria-hidden />
         <div className="relative mx-auto flex w-full max-w-4xl flex-col items-center md:flex-row md:items-center md:justify-center gap-8 md:gap-10 lg:gap-12">
           <div className="order-2 md:order-1 flex shrink-0 justify-center px-2">
             <img
