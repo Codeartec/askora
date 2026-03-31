@@ -7,6 +7,8 @@ export interface ModerationResult {
   standardReason: string | null;
   customViolation: boolean;
   customReason: string | null;
+  /** True when Groq/OpenRouter both failed — host must choose manual approval or wait for AI. */
+  llmUnavailable?: boolean;
 }
 
 @Injectable()
@@ -37,9 +39,19 @@ Respond ONLY with valid JSON:
     const userPrompt = `Question to evaluate: "${questionText}"`;
 
     try {
-      const raw = await this.llm.chatCompletion(systemPrompt, userPrompt);
-      if (!raw) return this.defaultApproved();
+      const result = await this.llm.chatCompletion(systemPrompt, userPrompt);
+      if (!result.ok) {
+        return {
+          approved: false,
+          standardViolation: false,
+          standardReason: null,
+          customViolation: false,
+          customReason: null,
+          llmUnavailable: true,
+        };
+      }
 
+      const raw = result.content;
       const parsed = JSON.parse(raw);
       return {
         approved: parsed.approved ?? true,
@@ -49,12 +61,15 @@ Respond ONLY with valid JSON:
         customReason: parsed.custom_reason ?? null,
       };
     } catch (err: any) {
-      this.logger.warn(`Moderation parse failed, approving by default: ${err?.message}`);
-      return this.defaultApproved();
+      this.logger.warn(`Moderation parse failed, treating as LLM unavailable: ${err?.message}`);
+      return {
+        approved: false,
+        standardViolation: false,
+        standardReason: null,
+        customViolation: false,
+        customReason: null,
+        llmUnavailable: true,
+      };
     }
-  }
-
-  private defaultApproved(): ModerationResult {
-    return { approved: true, standardViolation: false, standardReason: null, customViolation: false, customReason: null };
   }
 }

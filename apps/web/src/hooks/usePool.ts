@@ -44,7 +44,13 @@ export interface PoolState {
   lastQuestionMergeAt?: string | null;
   questionsSinceMerge?: number;
   showResolvedToParticipants?: boolean;
+  /** healthy | degraded — from server when host joins */
+  aiStatus?: 'healthy' | 'degraded';
+  aiDegradedMode?: string | null;
+  aiDegradedSince?: string | null;
 }
+
+export type AiDegradedMode = 'manual_approval' | 'wait_for_ai';
 
 export interface PollData {
   id: string;
@@ -104,6 +110,8 @@ export function usePool(poolCode: string | null) {
   const [pollLibraryRevision, setPollLibraryRevision] = useState(0);
   const [mergeInProgress, setMergeInProgress] = useState(false);
   const [similaritySubmitHint, setSimilaritySubmitHint] = useState<SimilarityHint | null>(null);
+  const [pendingHostQuestions, setPendingHostQuestions] = useState<Question[]>([]);
+  const [lastQuestionSubmitStatus, setLastQuestionSubmitStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!similaritySubmitHint) return;
@@ -119,6 +127,8 @@ export function usePool(poolCode: string | null) {
       setMergeInProgress(false);
       setResolvedItems([]);
       setSimilaritySubmitHint(null);
+      setPendingHostQuestions([]);
+      setLastQuestionSubmitStatus(null);
       return;
     }
 
@@ -126,6 +136,8 @@ export function usePool(poolCode: string | null) {
     setParticipantRoster(null);
     setResolvedItems([]);
     setSimilaritySubmitHint(null);
+    setPendingHostQuestions([]);
+    setLastQuestionSubmitStatus(null);
     setLiveAudienceCount(0);
     setActivePoll(null);
     setPollResults(null);
@@ -152,12 +164,29 @@ export function usePool(poolCode: string | null) {
     socket.on(
       'pool:joined',
       (data: {
-        pool: PoolState;
+        pool: PoolState & {
+          aiStatus?: 'healthy' | 'degraded';
+          aiDegradedMode?: string | null;
+          aiDegradedSince?: string | null;
+        };
+        ai?: {
+          status: 'healthy' | 'degraded';
+          degradedMode: string | null;
+          degradedSince: string | null;
+        };
+        pendingHostQuestions?: Question[];
         displayItems: DisplayItem[];
         resolvedItems?: DisplayItem[];
         activePoll?: { poll: Omit<PollData, 'options'>; options: PollData['options'] } | null;
       }) => {
-        setPool(data.pool);
+        const p = data.pool;
+        const ai = data.ai;
+        setPool({
+          ...p,
+          aiStatus: ai?.status ?? p.aiStatus ?? 'healthy',
+          aiDegradedMode: ai?.degradedMode ?? p.aiDegradedMode ?? null,
+          aiDegradedSince: ai?.degradedSince ?? p.aiDegradedSince ?? null,
+        });
         setDisplayItems(data.displayItems);
         setResolvedItems(data.resolvedItems ?? []);
         setVoteCounts(voteCountsFromItems(data.displayItems));
@@ -167,11 +196,50 @@ export function usePool(poolCode: string | null) {
           setActivePoll(null);
         }
         setPollResults(null);
+        if (Array.isArray(data.pendingHostQuestions)) {
+          setPendingHostQuestions(data.pendingHostQuestions);
+        } else {
+          setPendingHostQuestions([]);
+        }
       },
     );
 
     socket.on('pool:status-changed', (data: { status: string }) => {
       setPool((p) => (p ? { ...p, status: data.status } : p));
+    });
+
+    socket.on(
+      'ai:status-changed',
+      (data: {
+        status: 'healthy' | 'degraded';
+        degradedMode: string | null;
+        degradedSince: string | null;
+      }) => {
+        setPool((p) =>
+          p
+            ? {
+                ...p,
+                aiStatus: data.status,
+                aiDegradedMode: data.degradedMode,
+                aiDegradedSince: data.degradedSince,
+              }
+            : p,
+        );
+      },
+    );
+
+    socket.on(
+      'question:pending-host-decision',
+      (data: { question: Question; moderationStatus: string }) => {
+        setPendingHostQuestions((prev) => {
+          if (prev.some((q) => q.id === data.question.id)) return prev;
+          return [data.question, ...prev];
+        });
+      },
+    );
+
+    socket.on('question:pending-host-resolved', (data: { questionId: string }) => {
+      setPendingHostQuestions((prev) => prev.filter((q) => q.id !== data.questionId));
     });
 
     socket.on('question:new', (data: { displayItem: DisplayItem }) => {
@@ -249,6 +317,7 @@ export function usePool(poolCode: string | null) {
     socket.on(
       'question:submitted',
       (data: { status: string; similarityHint?: SimilarityHint }) => {
+        setLastQuestionSubmitStatus(data.status);
         if (data.status === 'ok' && data.similarityHint) {
           setSimilaritySubmitHint(data.similarityHint);
         }
@@ -256,11 +325,8 @@ export function usePool(poolCode: string | null) {
     );
 
     socket.on('question:moderated', (data: { questionId: string; action: string }) => {
-      if (data.action === 'approve') {
-        setFlaggedQuestions((prev) => prev.filter((q) => q.id !== data.questionId));
-      } else {
-        setFlaggedQuestions((prev) => prev.filter((q) => q.id !== data.questionId));
-      }
+      setFlaggedQuestions((prev) => prev.filter((q) => q.id !== data.questionId));
+      setPendingHostQuestions((prev) => prev.filter((q) => q.id !== data.questionId));
     });
 
     socket.on('participants:live-count', (data: { audienceConnected: number }) => {
@@ -305,8 +371,15 @@ export function usePool(poolCode: string | null) {
 
   const dismissSimilarityHint = useCallback(() => setSimilaritySubmitHint(null), []);
 
+  const dismissLastQuestionSubmitStatus = useCallback(() => setLastQuestionSubmitStatus(null), []);
+
   const submitQuestion = useCallback((text: string) => {
+    setLastQuestionSubmitStatus(null);
     socketRef.current?.emit('question:submit', { text });
+  }, []);
+
+  const setAiDegradedMode = useCallback((mode: AiDegradedMode) => {
+    socketRef.current?.emit('pool:set-ai-degraded-mode', { mode });
   }, []);
 
   const voteDisplayItem = useCallback((item: DisplayItem) => {
@@ -399,6 +472,9 @@ export function usePool(poolCode: string | null) {
     displayItems: sortedDisplayItems,
     resolvedItems: sortedResolvedItems,
     flaggedQuestions,
+    pendingHostQuestions,
+    lastQuestionSubmitStatus,
+    dismissLastQuestionSubmitStatus,
     liveAudienceCount,
     participantRoster,
     voteCounts,
@@ -413,6 +489,7 @@ export function usePool(poolCode: string | null) {
     voteDisplayItem,
     updateStatus,
     moderateQuestion,
+    setAiDegradedMode,
     markDisplayItemAnswered,
     setShowResolvedToParticipants,
     triggerMerge,

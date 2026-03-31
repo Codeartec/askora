@@ -45,6 +45,11 @@ model Pool {
   questionsSinceMerge   Int       @default(0) @map("questions_since_merge")
   lastQuestionMergeAt   DateTime? @map("last_question_merge_at")
   showResolvedToParticipants Boolean @default(false) @map("show_resolved_to_participants")
+  /** healthy | degraded — when LLM calls fail, host chooses manual approval or wait for AI */
+  aiStatus         String    @default("healthy") @map("ai_status") @db.VarChar(20)
+  /** manual_approval | wait_for_ai — set by host while degraded; null when healthy */
+  aiDegradedMode   String?   @map("ai_degraded_mode") @db.VarChar(30)
+  aiDegradedSince  DateTime? @map("ai_degraded_since")
 
   creatorId String @map("creator_id") @db.Uuid
   creator   User   @relation(fields: [creatorId], references: [id])

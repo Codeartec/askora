@@ -173,13 +173,15 @@ Response format:
 }`;
 
     try {
-      const raw = await this.llm.chatCompletion(systemPrompt, userPrompt);
-      if (!raw) {
-        this.logger.warn('LLM returned null for merge');
+      const result = await this.llm.chatCompletion(systemPrompt, userPrompt);
+      if (result.ok === false) {
+        this.logger.warn(
+          `LLM unavailable for merge: ${result.reason}${result.message ? ` (${result.message})` : ''}`,
+        );
         return [];
       }
 
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(result.content);
       if (!parsed.clusters || !Array.isArray(parsed.clusters)) {
         this.logger.warn('Invalid merge response format');
         return [];

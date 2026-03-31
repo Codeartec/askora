@@ -51,6 +51,14 @@ export class QuestionsService {
     });
   }
 
+  async findPendingHostDecisionByPool(poolId: string) {
+    return this.prisma.question.findMany({
+      where: { poolId, moderationStatus: 'pending_host_decision' },
+      include: { participant: { select: { id: true, displayName: true, isAnonymous: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async updateModeration(id: string, status: string) {
     await this.prisma.question.update({ where: { id }, data: { moderationStatus: status } });
     return this.prisma.question.findUnique({

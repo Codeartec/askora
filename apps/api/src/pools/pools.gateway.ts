@@ -167,6 +167,20 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       : null;
 
+    const pendingHostQuestions =
+      jwtUserId === pool.creatorId
+        ? await this.questionsService.findPendingHostDecisionByPool(pool.id)
+        : undefined;
+
+    const aiPayload =
+      jwtUserId === pool.creatorId
+        ? {
+            status: pool.aiStatus as 'healthy' | 'degraded',
+            degradedMode: pool.aiDegradedMode,
+            degradedSince: pool.aiDegradedSince?.toISOString() ?? null,
+          }
+        : undefined;
+
     client.emit('pool:joined', {
       pool: {
         id: pool.id,
@@ -179,11 +193,20 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         lastQuestionMergeAt: pool.lastQuestionMergeAt?.toISOString() ?? null,
         questionsSinceMerge: pool.questionsSinceMerge,
         showResolvedToParticipants: pool.showResolvedToParticipants,
+        ...(aiPayload
+          ? {
+              aiStatus: aiPayload.status,
+              aiDegradedMode: aiPayload.degradedMode,
+              aiDegradedSince: aiPayload.degradedSince,
+            }
+          : {}),
       },
       displayItems,
       resolvedItems,
       participantCount,
       activePoll,
+      ...(pendingHostQuestions !== undefined ? { pendingHostQuestions } : {}),
+      ...(aiPayload !== undefined ? { ai: aiPayload } : {}),
     });
 
     if (jwtUserId === pool.creatorId && activePollRow) {
@@ -247,6 +270,43 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.broadcastDisplaySync(poolCode, poolId, pool.creatorId);
   }
 
+  @SubscribeMessage('pool:set-ai-degraded-mode')
+  async handleSetAiDegradedMode(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { mode: 'manual_approval' | 'wait_for_ai' },
+  ) {
+    if (!(await this.ensureJwtAuth(client))) {
+      client.emit('error', { message: 'Unauthorized' });
+      return;
+    }
+
+    const poolCode = client.data.poolCode;
+    const poolId = client.data.poolId;
+    if (!poolCode || !poolId) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user.id) {
+      client.emit('error', { message: 'Not the pool creator' });
+      return;
+    }
+
+    if (pool.aiStatus !== 'degraded') {
+      client.emit('error', { message: 'AI is not degraded' });
+      return;
+    }
+
+    const updated = await this.prisma.pool.update({
+      where: { id: poolId },
+      data: { aiDegradedMode: data.mode },
+    });
+
+    this.server.to(`pool:${poolCode}:admin`).emit('ai:status-changed', {
+      status: 'degraded',
+      degradedMode: updated.aiDegradedMode,
+      degradedSince: updated.aiDegradedSince?.toISOString() ?? null,
+    });
+  }
+
   @SubscribeMessage('question:submit')
   async handleQuestionSubmit(
     @ConnectedSocket() client: Socket,
@@ -270,6 +330,48 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       data.text,
       pool.customFilterRules,
     );
+
+    if (!modResult.llmUnavailable) {
+      await this.markAiHealthyAndReprocess(poolId, poolCode, pool.creatorId, {
+        aiStatus: pool.aiStatus,
+        aiDegradedMode: pool.aiDegradedMode,
+        customFilterRules: pool.customFilterRules,
+      });
+    }
+
+    if (modResult.llmUnavailable) {
+      const question = await this.questionsService.create({
+        poolId,
+        participantId,
+        originalText: data.text,
+        moderationStatus: 'pending_host_decision',
+        moderationReason: null,
+      });
+
+      await this.prisma.pool.update({
+        where: { id: poolId },
+        data: {
+          aiStatus: 'degraded',
+          ...(!pool.aiDegradedSince ? { aiDegradedSince: new Date() } : {}),
+        },
+      });
+
+      const poolAfter = await this.prisma.pool.findUnique({ where: { id: poolId } });
+
+      this.server.to(`pool:${poolCode}:admin`).emit('ai:status-changed', {
+        status: 'degraded',
+        degradedMode: poolAfter?.aiDegradedMode ?? null,
+        degradedSince: poolAfter?.aiDegradedSince?.toISOString() ?? null,
+      });
+
+      this.server.to(`pool:${poolCode}:admin`).emit('question:pending-host-decision', {
+        question,
+        moderationStatus: 'pending_host_decision',
+      });
+
+      client.emit('question:submitted', { status: 'pending_ai' });
+      return;
+    }
 
     let moderationStatus = 'approved';
     let moderationReason: string | null = null;
@@ -297,22 +399,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         pool.showResolvedToParticipants,
       );
 
-      const updatedPool = await this.prisma.pool.update({
-        where: { id: poolId },
-        data: { questionsSinceMerge: { increment: 1 } },
-        select: { questionsSinceMerge: true, creatorId: true },
-      });
-
-      if (updatedPool.questionsSinceMerge >= 3) {
-        await this.mergeService.runMergePass(poolId);
-        await this.broadcastDisplaySync(poolCode, poolId, updatedPool.creatorId);
-      } else {
-        const enriched = await this.questionsService.enrichQuestionForEmit(question.id);
-        if (enriched) {
-          const displayItem = this.questionsService.standaloneQuestionToDisplayItem(enriched);
-          this.server.to(`pool:${poolCode}`).emit('question:new', { displayItem });
-        }
-      }
+      await this.broadcastQuestionApproveEffects(poolId, poolCode, question.id, pool.creatorId);
 
       client.emit('question:submitted', {
         status: 'ok',
@@ -380,24 +467,15 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (data.action === 'approve') {
       await this.questionsService.updateModeration(data.questionId, 'approved');
-      const updatedPool = await this.prisma.pool.update({
-        where: { id: pool.id },
-        data: { questionsSinceMerge: { increment: 1 } },
-        select: { questionsSinceMerge: true, creatorId: true },
+      await this.broadcastQuestionApproveEffects(pool.id, poolCode, data.questionId, pool.creatorId);
+      this.server.to(`pool:${poolCode}:admin`).emit('question:pending-host-resolved', {
+        questionId: data.questionId,
       });
-
-      if (updatedPool.questionsSinceMerge >= 3) {
-        await this.mergeService.runMergePass(pool.id);
-        await this.broadcastDisplaySync(poolCode, pool.id, updatedPool.creatorId);
-      } else {
-        const enriched = await this.questionsService.enrichQuestionForEmit(data.questionId);
-        if (enriched) {
-          const displayItem = this.questionsService.standaloneQuestionToDisplayItem(enriched);
-          this.server.to(`pool:${poolCode}`).emit('question:new', { displayItem });
-        }
-      }
     } else {
       await this.questionsService.updateModeration(data.questionId, 'rejected');
+      this.server.to(`pool:${poolCode}:admin`).emit('question:pending-host-resolved', {
+        questionId: data.questionId,
+      });
     }
 
     client.emit('question:moderated', { questionId: data.questionId, action: data.action });
@@ -774,6 +852,122 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       anonymousCount,
       named,
     });
+  }
+
+  private async broadcastQuestionApproveEffects(
+    poolId: string,
+    poolCode: string,
+    questionId: string,
+    _creatorId: string,
+  ): Promise<void> {
+    const updatedPool = await this.prisma.pool.update({
+      where: { id: poolId },
+      data: { questionsSinceMerge: { increment: 1 } },
+      select: { questionsSinceMerge: true, creatorId: true },
+    });
+
+    if (updatedPool.questionsSinceMerge >= 3) {
+      await this.mergeService.runMergePass(poolId);
+      await this.broadcastDisplaySync(poolCode, poolId, updatedPool.creatorId);
+    } else {
+      const enriched = await this.questionsService.enrichQuestionForEmit(questionId);
+      if (enriched) {
+        const displayItem = this.questionsService.standaloneQuestionToDisplayItem(enriched);
+        this.server.to(`pool:${poolCode}`).emit('question:new', { displayItem });
+      }
+    }
+  }
+
+  private async markAiHealthyAndReprocess(
+    poolId: string,
+    poolCode: string,
+    creatorId: string,
+    poolRow: { aiStatus: string; aiDegradedMode: string | null; customFilterRules: string | null },
+  ) {
+    if (poolRow.aiStatus !== 'degraded') return;
+
+    const wasWaitForAi = poolRow.aiDegradedMode === 'wait_for_ai';
+
+    await this.prisma.pool.update({
+      where: { id: poolId },
+      data: {
+        aiStatus: 'healthy',
+        aiDegradedMode: null,
+        aiDegradedSince: null,
+      },
+    });
+
+    this.server.to(`pool:${poolCode}:admin`).emit('ai:status-changed', {
+      status: 'healthy',
+      degradedMode: null,
+      degradedSince: null,
+    });
+
+    if (wasWaitForAi) {
+      const pending = await this.questionsService.findPendingHostDecisionByPool(poolId);
+      for (const q of pending) {
+        await this.reprocessPendingQuestionWithLlm(poolId, poolCode, creatorId, q, poolRow.customFilterRules);
+      }
+    }
+  }
+
+  private async reprocessPendingQuestionWithLlm(
+    poolId: string,
+    poolCode: string,
+    creatorId: string,
+    q: {
+      id: string;
+      originalText: string;
+      participant: { id: string; displayName: string | null; isAnonymous: boolean };
+    },
+    customFilterRules: string | null,
+  ) {
+    const mod = await this.moderationService.moderateQuestion(q.originalText, customFilterRules);
+    if (mod.llmUnavailable) return;
+
+    if (mod.standardViolation) {
+      await this.prisma.question.update({
+        where: { id: q.id },
+        data: { moderationStatus: 'flagged_standard', moderationReason: mod.standardReason },
+      });
+      const row = await this.prisma.question.findUnique({
+        where: { id: q.id },
+        include: { participant: { select: { id: true, displayName: true, isAnonymous: true } } },
+      });
+      if (row) {
+        this.server.to(`pool:${poolCode}:admin`).emit('question:flagged', {
+          question: row,
+          moderationStatus: 'flagged_standard',
+          reason: mod.standardReason,
+        });
+      }
+      this.server.to(`pool:${poolCode}:admin`).emit('question:pending-host-resolved', { questionId: q.id });
+      return;
+    }
+
+    if (mod.customViolation) {
+      await this.prisma.question.update({
+        where: { id: q.id },
+        data: { moderationStatus: 'flagged_custom', moderationReason: mod.customReason },
+      });
+      const row = await this.prisma.question.findUnique({
+        where: { id: q.id },
+        include: { participant: { select: { id: true, displayName: true, isAnonymous: true } } },
+      });
+      if (row) {
+        this.server.to(`pool:${poolCode}:admin`).emit('question:flagged', {
+          question: row,
+          moderationStatus: 'flagged_custom',
+          reason: mod.customReason,
+        });
+      }
+      this.server.to(`pool:${poolCode}:admin`).emit('question:pending-host-resolved', { questionId: q.id });
+      return;
+    }
+
+    await this.questionsService.updateModeration(q.id, 'approved');
+    await this.broadcastQuestionApproveEffects(poolId, poolCode, q.id, creatorId);
+    this.server.to(`pool:${poolCode}:admin`).emit('question:pending-host-resolved', { questionId: q.id });
   }
 
   emitToPool(poolCode: string, event: string, data: any) {

@@ -1,6 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import type { ChatCompletionFailureReason, ChatCompletionResult, LlmProviderId } from './llm.types';
+
+function classifyOpenAiError(err: unknown): { reason: ChatCompletionFailureReason; message: string } {
+  const e = err as { status?: number; message?: string; code?: string };
+  const message = typeof e?.message === 'string' ? e.message : String(err);
+  const status = typeof e?.status === 'number' ? e.status : undefined;
+  const code = typeof e?.code === 'string' ? e.code : '';
+
+  if (status === 429) {
+    return { reason: 'rate_limited', message };
+  }
+  if (status !== undefined && status >= 500) {
+    return { reason: 'provider_error', message };
+  }
+  if (
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ENOTFOUND' ||
+    /fetch failed|network|timeout/i.test(message)
+  ) {
+    return { reason: 'network', message };
+  }
+  if (status !== undefined && status >= 400) {
+    return { reason: 'provider_error', message };
+  }
+  return { reason: 'unknown', message };
+}
 
 @Injectable()
 export class LlmService {
@@ -21,13 +48,20 @@ export class LlmService {
       : null;
   }
 
-  async chatCompletion(systemPrompt: string, userPrompt: string): Promise<string | null> {
+  /**
+   * Groq first, then OpenRouter. Returns structured success/failure (no thrown errors for provider failures).
+   */
+  async chatCompletion(systemPrompt: string, userPrompt: string): Promise<ChatCompletionResult> {
     const messages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ];
 
-    // Try Groq first
+    if (!this.groqClient && !this.openRouterClient) {
+      this.logger.warn('No LLM API keys configured (GROQ_API_KEY / OPENROUTER_API_KEY)');
+      return { ok: false, reason: 'no_keys' };
+    }
+
     if (this.groqClient) {
       try {
         const res = await this.groqClient.chat.completions.create({
@@ -37,9 +71,14 @@ export class LlmService {
           max_tokens: 2048,
           response_format: { type: 'json_object' },
         });
-        return res.choices[0]?.message?.content ?? null;
-      } catch (err: any) {
-        this.logger.warn(`Groq failed, trying OpenRouter: ${err?.message}`);
+        const content = res.choices[0]?.message?.content ?? null;
+        if (content === null || content === '') {
+          return { ok: false, reason: 'provider_error', message: 'Empty Groq response', provider: 'groq' };
+        }
+        return { ok: true, content };
+      } catch (err: unknown) {
+        const { reason, message } = classifyOpenAiError(err);
+        this.logger.warn(`Groq failed (${reason}), trying OpenRouter: ${message}`);
       }
     }
 
@@ -51,13 +90,24 @@ export class LlmService {
           temperature: 0.2,
           max_tokens: 2048,
         });
-        return res.choices[0]?.message?.content ?? null;
-      } catch (err: any) {
-        this.logger.error(`OpenRouter also failed: ${err?.message}`);
+        const content = res.choices[0]?.message?.content ?? null;
+        if (content === null || content === '') {
+          return {
+            ok: false,
+            reason: 'provider_error',
+            message: 'Empty OpenRouter response',
+            provider: 'openrouter',
+          };
+        }
+        return { ok: true, content };
+      } catch (err: unknown) {
+        const { reason, message } = classifyOpenAiError(err);
+        this.logger.error(`OpenRouter also failed (${reason}): ${message}`);
+        return { ok: false, reason, message, provider: 'openrouter' };
       }
     }
 
     this.logger.error('All LLM providers failed');
-    return null;
+    return { ok: false, reason: 'unknown', message: 'All providers failed' };
   }
 }

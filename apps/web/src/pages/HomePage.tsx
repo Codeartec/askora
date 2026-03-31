@@ -13,7 +13,7 @@ export function HomePage() {
     <div className="relative isolate space-y-16">
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-6 bottom-0 left-1/2 w-screen -translate-x-1/2 -z-10 overflow-hidden md:-top-8"
+        className="pointer-events-none absolute -top-6 bottom-0 inset-x-0 w-full -z-10 overflow-hidden md:-top-8"
       >
         <div className="absolute -top-24 left-[10%] h-[min(55vh,420px)] w-[min(90vw,520px)] rounded-full bg-[color-mix(in_srgb,var(--color-primary)_12%,transparent)] blur-3xl animate-aurora-a" />
         <div className="absolute top-[20%] -right-[10%] h-[min(45vh,360px)] w-[min(80vw,440px)] rounded-full bg-teal-500/10 blur-3xl animate-aurora-b" />

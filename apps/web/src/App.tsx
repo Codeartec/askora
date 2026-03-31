@@ -14,6 +14,7 @@ import { PoolManagePage } from '@/pages/PoolManagePage';
 import { PoolLivePage } from '@/pages/PoolLivePage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { LoaderCat } from '@/components/LoaderCat';
+import { Toaster } from '@/components/ui/toaster';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuthStore();
@@ -31,6 +32,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <Toaster />
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<HomePage />} />

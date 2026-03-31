@@ -6,13 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Copy, Play, Square, Users, MessageSquare, ArrowLeft, Wifi, WifiOff, ShieldAlert, Check, X, Sparkles, ClipboardList, Plus, Send, PanelLeft, Trash2, Eye, EyeOff, ChevronDown, Loader2, QrCode, FileDown } from 'lucide-react';
+import { Copy, Play, Square, Users, MessageSquare, ArrowLeft, Wifi, WifiOff, ShieldAlert, Check, X, Sparkles, ClipboardList, Plus, Send, PanelLeft, Trash2, Eye, EyeOff, ChevronDown, Loader2, QrCode, FileDown, Power } from 'lucide-react';
 import { PoolJoinQrCode } from '@/components/PoolJoinQrCode';
 import { buildPoolJoinShareUrl, getPublicAppOrigin } from '@/lib/publicAppUrl';
 import { usePool, displayItemKey, type DisplayItem } from '@/hooks/usePool';
 import { Input } from '@/components/ui/input';
 import api from '@/lib/api';
 import { LoaderCat } from '@/components/LoaderCat';
+import { toast } from '@/components/ui/useToast';
+import { cn } from '@/lib/utils';
 
 type DraftPoll = {
   id: string;
@@ -89,6 +91,8 @@ export function PoolManagePage() {
     setShowResolvedToParticipants,
     triggerMerge,
     mergeInProgress,
+    pendingHostQuestions,
+    setAiDegradedMode,
     createPoll,
     launchPoll,
     closePoll,
@@ -222,6 +226,7 @@ export function PoolManagePage() {
       const ok = await copyToClipboard(displayPool.code);
       if (!ok) return;
       setCopied(true);
+      toast(t('pool.linkCopied'));
       setTimeout(() => setCopied(false), 2000);
     })();
   };
@@ -274,12 +279,21 @@ export function PoolManagePage() {
         ? displayPool.requireIdentification
         : false;
 
+  const aiStatus = (pool?.aiStatus ??
+    (poolData as { aiStatus?: 'healthy' | 'degraded' })?.aiStatus ??
+    'healthy') as 'healthy' | 'degraded';
+  const aiDegradedMode =
+    pool?.aiDegradedMode ??
+    (poolData as { aiDegradedMode?: string | null })?.aiDegradedMode ??
+    null;
+  const showAiChoiceModal = aiStatus === 'degraded' && (aiDegradedMode === null || aiDegradedMode === undefined);
+
   const statusCardClass =
     displayPool.status === 'active'
-      ? 'bg-emerald-50/40 border-emerald-200/60 dark:bg-emerald-950/10 dark:border-emerald-900/30'
+      ? 'border-2 border-emerald-400 bg-emerald-50 shadow-md ring-1 ring-emerald-200/70 dark:border-emerald-700/60 dark:bg-emerald-950/30 dark:ring-emerald-900/50'
       : displayPool.status === 'draft'
-        ? 'bg-amber-50/40 border-amber-200/60 dark:bg-amber-950/10 dark:border-amber-900/30'
-        : 'bg-muted/30 border-border';
+        ? 'border-2 border-amber-400/70 bg-amber-50/80 shadow-md ring-1 ring-amber-200/70 dark:border-amber-700/60 dark:bg-amber-950/30 dark:ring-amber-900/50'
+        : 'border-2 border-gray-100 bg-gray-50/40 shadow-sm ring-1 ring-gray-100/70 dark:border-neutral-800/55 dark:bg-gray-950/20 dark:ring-neutral-800/35';
 
   const shareOrigin = getPublicAppOrigin();
   const shareUrl =
@@ -291,8 +305,16 @@ export function PoolManagePage() {
       const ok = await copyToClipboard(shareUrl);
       if (!ok) return;
       setCopiedLink(true);
+      toast(t('pool.linkCopied'));
       setTimeout(() => setCopiedLink(false), 2000);
     })();
+  };
+
+  const scrollToQuestionsPanel = () => {
+    globalThis.document?.getElementById('questions-panel')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
   };
 
   const handleDownloadJoinPdf = async () => {
@@ -315,6 +337,42 @@ export function PoolManagePage() {
 
   return (
     <div className="space-y-6">
+      <Dialog open={showAiChoiceModal} onOpenChange={() => {}}>
+        <DialogContent
+          className="max-w-lg [&>button:last-child]:hidden"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-amber-500" />
+              {t('pool.aiDegradedModalTitle')}
+            </DialogTitle>
+            <DialogDescription>{t('pool.aiDegradedModalDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-auto flex-col items-start gap-1 py-4 text-left whitespace-normal"
+              onClick={() => setAiDegradedMode('manual_approval')}
+            >
+              <span className="font-semibold">{t('pool.aiModeManual')}</span>
+              <span className="text-xs font-normal text-muted-foreground">{t('pool.aiModeManualHint')}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-auto flex-col items-start gap-1 py-4 text-left whitespace-normal"
+              onClick={() => setAiDegradedMode('wait_for_ai')}
+            >
+              <span className="font-semibold">{t('pool.aiModeWait')}</span>
+              <span className="text-xs font-normal text-muted-foreground">{t('pool.aiModeWaitHint')}</span>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard')}>
           <ArrowLeft className="h-5 w-5" />
@@ -375,17 +433,118 @@ export function PoolManagePage() {
         </Card>
       )}
 
+      {aiStatus === 'degraded' && (
+        <Card className="border-amber-200 bg-amber-50/80 dark:border-amber-900/40 dark:bg-amber-950/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Sparkles className="h-5 w-5 shrink-0 text-amber-600" aria-hidden />
+              {t('pool.aiDegradedTitle')}
+            </CardTitle>
+            <CardDescription className="text-xs sm:text-sm">
+              {t('pool.aiDegradedBanner')}
+              {aiDegradedMode === 'manual_approval' ? (
+                <span className="mt-2 block font-medium text-foreground">{t('pool.aiStatusManual')}</span>
+              ) : null}
+              {aiDegradedMode === 'wait_for_ai' ? (
+                <span className="mt-2 block font-medium text-foreground">{t('pool.aiStatusWait')}</span>
+              ) : null}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-4">
+        <Card className={`flex h-full min-h-0 flex-col ${statusCardClass}`}>
+          <CardHeader className="space-y-2 p-4 pb-2 text-center">
+            <div
+              className={cn(
+                'mx-auto flex size-11 shrink-0 items-center justify-center rounded-2xl ring-1',
+                displayPool.status === 'active' &&
+                  'bg-emerald-500/20 text-emerald-800 ring-emerald-400/80 dark:text-emerald-300 dark:ring-emerald-700/60',
+                displayPool.status === 'closed' &&
+                  'bg-gray-200/70 text-gray-700 ring-gray-300/80 dark:bg-gray-800/80 dark:text-gray-200 dark:ring-gray-700/60',
+                displayPool.status === 'draft' && 'bg-primary/15 text-primary ring-primary/20',
+              )}
+            >
+              <Power className="size-5" aria-hidden />
+            </div>
+            <CardTitle className="text-base font-semibold leading-tight">{t('pool.status')}</CardTitle>
+            <CardDescription
+              className={cn(
+                'mx-auto max-w-[26ch] text-xs leading-relaxed text-gray-700 dark:text-muted-foreground',
+              )}
+            >
+              {t('pool.statusCardHint')}
+            </CardDescription>
+            {displayPool.status === 'active' ? (
+              <Badge
+                variant="success"
+                className="mx-auto w-fit justify-center gap-1.5 border-transparent pr-2.5"
+              >
+                <span
+                  className="inline-flex size-2 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+                  aria-hidden
+                />
+                {t('pool.active')}
+              </Badge>
+            ) : displayPool.status === 'closed' ? (
+              <Badge className="mx-auto w-fit justify-center border-transparent bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-100">
+                {t('pool.closed')}
+              </Badge>
+            ) : (
+              <Badge variant={statusVariant} className="mx-auto w-fit justify-center">
+                {t(`pool.${displayPool.status}`)}
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 pt-0 text-center">
+            <div className="flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center sm:justify-center">
+              {displayPool.status === 'draft' && (
+                <Button
+                  onClick={() => updateStatus('active')}
+                  className="gap-1.5 shadow-sm bg-green-600 text-white transition-colors duration-200 hover:bg-green-700 focus-visible:ring-emerald-500/40"
+                >
+                  <Play className="h-4 w-4 shrink-0" aria-hidden /> {t('pool.open')}
+                </Button>
+              )}
+              {displayPool.status === 'active' && (
+                <Button
+                  type="button"
+                  onClick={() => updateStatus('closed')}
+                  className="gap-1.5 shadow-sm bg-red-500 text-white transition-colors duration-200 hover:bg-red-600 focus-visible:ring-red-500/40"
+                >
+                  <Square className="h-4 w-4 shrink-0" aria-hidden /> {t('pool.close')}
+                </Button>
+              )}
+              {displayPool.status === 'closed' && (
+                <Button
+                  onClick={() => updateStatus('active')}
+                  className="gap-1.5 shadow-sm bg-green-600 text-white transition-colors duration-200 hover:bg-green-700 focus-visible:ring-emerald-500/40"
+                >
+                  <Play className="h-4 w-4 shrink-0" aria-hidden /> {t('pool.open')}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="flex h-full min-h-0 flex-col bg-linear-to-br from-violet-50/80 to-white border-border shadow-md dark:from-violet-950/20 dark:to-card">
           <CardContent className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
             <p className="text-sm text-muted-foreground">{t('pool.code')}</p>
             <div className="flex items-center justify-center gap-2">
               <span className="text-2xl font-mono font-bold tracking-widest">{displayPool.code}</span>
-              <Button variant="ghost" size="icon" onClick={copyCode} className="h-8 w-8">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={copyCode}
+                className="h-8 w-8 transition-colors duration-200"
+                title={t('pool.copyCodeTooltip')}
+                aria-label={t('pool.copyCodeTooltip')}
+              >
                 {copied ? (
-                  <Check className="h-4 w-4 text-green-600" />
+                  <Check className="h-4 w-4 text-green-600" aria-hidden />
                 ) : (
-                  <Copy className="h-4 w-4" />
+                  <Copy className="h-4 w-4" aria-hidden />
                 )}
               </Button>
             </div>
@@ -399,14 +558,14 @@ export function PoolManagePage() {
                 variant="outline"
                 onClick={copyShareLink}
                 disabled={!shareUrl || copiedLink}
-                className="gap-1.5 h-10 sm:h-9"
+                className="gap-1.5 h-10 transition-colors duration-200 sm:h-9"
               >
                 {copiedLink ? (
-                  <Check className="h-3.5 w-3.5 text-green-600" />
+                  <Check className="h-3.5 w-3.5 text-green-600" aria-hidden />
                 ) : (
-                  <Copy className="h-3.5 w-3.5" />
+                  <Copy className="h-3.5 w-3.5" aria-hidden />
                 )}
-                {copiedLink ? t('pool.linkCopied') : t('pool.copyLink')}
+                {copiedLink ? t('pool.linkCopied') : t('pool.copyInviteLink')}
               </Button>
               <Button
                 type="button"
@@ -414,7 +573,7 @@ export function PoolManagePage() {
                 variant="secondary"
                 onClick={() => setPresentQrOpen(true)}
                 disabled={!shareUrl}
-                className="gap-1.5 h-10 sm:h-9"
+                className="gap-1.5 h-10 transition-colors duration-200 sm:h-9"
               >
                 <QrCode className="h-4 w-4 shrink-0" aria-hidden />
                 {t('pool.presentJoinView')}
@@ -423,41 +582,18 @@ export function PoolManagePage() {
           </CardContent>
         </Card>
 
-        <Card className={`flex h-full min-h-0 flex-col ${statusCardClass}`}>
-          <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
-            <p className="text-sm text-muted-foreground">{t('pool.status')}</p>
-            <div className="flex justify-center gap-2">
-              {displayPool.status === 'draft' && (
-                <Button size="sm" onClick={() => updateStatus('active')} className="gap-1.5">
-                  <Play className="h-4 w-4" /> {t('pool.open')}
-                </Button>
-              )}
-              {displayPool.status === 'active' && (
-                <Button size="sm" variant="destructive" onClick={() => updateStatus('closed')} className="gap-1.5">
-                  <Square className="h-4 w-4" /> {t('pool.close')}
-                </Button>
-              )}
-              {displayPool.status === 'closed' && (
-                <Button size="sm" onClick={() => updateStatus('active')} className="gap-1.5">
-                  <Play className="h-4 w-4" /> Reopen
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
         <Card className="flex h-full min-h-0 flex-col border-border">
           <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
             <p className="text-sm text-muted-foreground">{t('dashboard.participants')}</p>
             <div className="flex items-center justify-center gap-1">
-              <Users className="h-5 w-5 text-primary" />
-              <span className="text-2xl font-bold">{participantsCardCount}</span>
+              <Users className="h-5 w-5 text-primary" aria-hidden />
+              <span className="text-3xl font-bold tabular-nums text-primary">{participantsCardCount}</span>
             </div>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="gap-1.5 w-full h-10 sm:h-9"
+              className="gap-1.5 h-10 w-full transition-colors duration-200 sm:h-9"
               onClick={() => setParticipantsPanelOpen(true)}
             >
               <PanelLeft className="h-4 w-4" />
@@ -470,9 +606,19 @@ export function PoolManagePage() {
           <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
             <p className="text-sm text-muted-foreground">{t('dashboard.questions')}</p>
             <div className="flex items-center justify-center gap-1">
-              <MessageSquare className="h-5 w-5 text-primary" />
-              <span className="text-2xl font-bold">{displayItems.length}</span>
+              <MessageSquare className="h-5 w-5 text-primary" aria-hidden />
+              <span className="text-3xl font-bold tabular-nums text-primary">{displayItems.length}</span>
             </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-10 w-full transition-colors duration-200 sm:h-9"
+              onClick={scrollToQuestionsPanel}
+            >
+              <PanelLeft className="h-4 w-4" aria-hidden />
+              {t('pool.viewQuestionsCta')}
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -513,6 +659,50 @@ export function PoolManagePage() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {pendingHostQuestions.length > 0 && (
+        <Card className="border-sky-200 bg-sky-50/50 dark:border-sky-900/40 dark:bg-sky-950/25">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Sparkles className="h-5 w-5 shrink-0 text-sky-600" aria-hidden />
+              {t('pool.aiPendingTitle')} ({pendingHostQuestions.length})
+            </CardTitle>
+            <CardDescription className="text-xs">{t('pool.aiPendingHint')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {pendingHostQuestions.map((q) => (
+              <div key={q.id} className="flex items-start gap-3 rounded-lg border border-sky-200/80 bg-white p-3 dark:border-sky-900/50 dark:bg-card">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm">{q.originalText}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {q.participant?.isAnonymous ? t('participant.anonymous') : q.participant?.displayName}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => moderateQuestion(q.id, 'approve')}
+                    className="h-8 w-8 p-0"
+                    aria-label={t('question.approve')}
+                  >
+                    <Check className="h-4 w-4 text-green-600" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => moderateQuestion(q.id, 'reject')}
+                    className="h-8 w-8 p-0"
+                    aria-label={t('question.dismiss')}
+                  >
+                    <X className="h-4 w-4 text-red-600" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {flaggedQuestions.length > 0 && (
         <Card className="border-yellow-200 bg-yellow-50/50">
@@ -875,8 +1065,9 @@ export function PoolManagePage() {
       </Card>
 
       <Card
+        id="questions-panel"
         className={[
-          'border-border transition-colors duration-700 motion-reduce:transition-none',
+          'scroll-mt-6 border-border transition-colors duration-700 motion-reduce:transition-none',
           isMergeHighlightActive
             ? 'border-primary/50 bg-primary/3 shadow-[0_0_0_1px_hsl(var(--primary)/0.12)] motion-safe:animate-pulse'
             : '',

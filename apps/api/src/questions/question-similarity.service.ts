@@ -98,9 +98,9 @@ ${list}
 Respond with JSON only. Either {"match": false} or {"match": true, "candidate_index": N} where N is the 1-based index in the list above.`;
 
     try {
-      const raw = await this.llm.chatCompletion(systemPrompt, userPrompt);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
+      const result = await this.llm.chatCompletion(systemPrompt, userPrompt);
+      if (!result.ok) return null;
+      const parsed = JSON.parse(result.content);
       if (!parsed.match || typeof parsed.candidate_index !== 'number') return null;
       const idx = parsed.candidate_index - 1;
       if (idx < 0 || idx >= trimmed.length) return null;

@@ -56,6 +56,8 @@ export function PoolLivePage() {
     submitQuestion,
     similaritySubmitHint,
     dismissSimilarityHint,
+    lastQuestionSubmitStatus,
+    dismissLastQuestionSubmitStatus,
     voteDisplayItem,
     respondToPoll,
   } = usePool(poolCode);
@@ -222,6 +224,23 @@ export function PoolLivePage() {
                 {t('question.submit')}
               </Button>
             </div>
+            {lastQuestionSubmitStatus === 'pending_ai' ? (
+              <div
+                role="status"
+                className="flex flex-col gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-foreground sm:flex-row sm:items-start sm:justify-between"
+              >
+                <p className="min-w-0 flex-1">{t('question.pendingAiNotice')}</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 shrink-0 self-end text-muted-foreground hover:text-foreground"
+                  onClick={dismissLastQuestionSubmitStatus}
+                >
+                  {t('question.similarityDismiss')}
+                </Button>
+              </div>
+            ) : null}
             {similaritySubmitHint ? (
               <div
                 role="status"
