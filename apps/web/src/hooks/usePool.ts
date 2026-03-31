@@ -43,6 +43,7 @@ export interface PoolState {
   creator: { id: string; name: string };
   lastQuestionMergeAt?: string | null;
   questionsSinceMerge?: number;
+  showResolvedToParticipants?: boolean;
 }
 
 export interface PollData {
@@ -72,6 +73,13 @@ export function displayItemKey(item: DisplayItem): string {
   return item.kind === 'cluster' ? `c:${item.clusterId}` : `q:${item.id}`;
 }
 
+export interface SimilarityHint {
+  scope: 'live' | 'resolved';
+  kind: 'cluster' | 'question';
+  id: string;
+  previewText: string;
+}
+
 function voteCountsFromItems(items: DisplayItem[]): VoteState {
   const vc: VoteState = {};
   for (const it of items) {
@@ -85,6 +93,7 @@ export function usePool(poolCode: string | null) {
   const [connected, setConnected] = useState(false);
   const [pool, setPool] = useState<PoolState | null>(null);
   const [displayItems, setDisplayItems] = useState<DisplayItem[]>([]);
+  const [resolvedItems, setResolvedItems] = useState<DisplayItem[]>([]);
   const [flaggedQuestions, setFlaggedQuestions] = useState<Question[]>([]);
   const [liveAudienceCount, setLiveAudienceCount] = useState(0);
   const [voteCounts, setVoteCounts] = useState<VoteState>({});
@@ -94,6 +103,13 @@ export function usePool(poolCode: string | null) {
   const [participantRoster, setParticipantRoster] = useState<ParticipantRoster | null>(null);
   const [pollLibraryRevision, setPollLibraryRevision] = useState(0);
   const [mergeInProgress, setMergeInProgress] = useState(false);
+  const [similaritySubmitHint, setSimilaritySubmitHint] = useState<SimilarityHint | null>(null);
+
+  useEffect(() => {
+    if (!similaritySubmitHint) return;
+    const timer = setTimeout(() => setSimilaritySubmitHint(null), 15000);
+    return () => clearTimeout(timer);
+  }, [similaritySubmitHint]);
 
   useEffect(() => {
     if (!poolCode) {
@@ -101,11 +117,15 @@ export function usePool(poolCode: string | null) {
       setLiveAudienceCount(0);
       setPollLibraryRevision(0);
       setMergeInProgress(false);
+      setResolvedItems([]);
+      setSimilaritySubmitHint(null);
       return;
     }
 
     setMergeInProgress(false);
     setParticipantRoster(null);
+    setResolvedItems([]);
+    setSimilaritySubmitHint(null);
     setLiveAudienceCount(0);
     setActivePoll(null);
     setPollResults(null);
@@ -134,10 +154,12 @@ export function usePool(poolCode: string | null) {
       (data: {
         pool: PoolState;
         displayItems: DisplayItem[];
+        resolvedItems?: DisplayItem[];
         activePoll?: { poll: Omit<PollData, 'options'>; options: PollData['options'] } | null;
       }) => {
         setPool(data.pool);
         setDisplayItems(data.displayItems);
+        setResolvedItems(data.resolvedItems ?? []);
         setVoteCounts(voteCountsFromItems(data.displayItems));
         if (data.activePoll) {
           setActivePoll({ ...data.activePoll.poll, options: data.activePoll.options });
@@ -179,9 +201,15 @@ export function usePool(poolCode: string | null) {
       'questions:merged-sync',
       (data: {
         displayItems: DisplayItem[];
-        pool: { lastQuestionMergeAt: string | null; questionsSinceMerge: number };
+        resolvedItems?: DisplayItem[];
+        pool: {
+          lastQuestionMergeAt: string | null;
+          questionsSinceMerge: number;
+          showResolvedToParticipants?: boolean;
+        };
       }) => {
         setDisplayItems(data.displayItems);
+        setResolvedItems(data.resolvedItems ?? []);
         setVoteCounts(voteCountsFromItems(data.displayItems));
         setPool((p) =>
           p
@@ -189,6 +217,9 @@ export function usePool(poolCode: string | null) {
                 ...p,
                 lastQuestionMergeAt: data.pool.lastQuestionMergeAt,
                 questionsSinceMerge: data.pool.questionsSinceMerge,
+                ...(typeof data.pool.showResolvedToParticipants === 'boolean'
+                  ? { showResolvedToParticipants: data.pool.showResolvedToParticipants }
+                  : {}),
               }
             : p,
         );
@@ -215,7 +246,14 @@ export function usePool(poolCode: string | null) {
       setFlaggedQuestions((prev) => [data.question, ...prev]);
     });
 
-    socket.on('question:submitted', () => {});
+    socket.on(
+      'question:submitted',
+      (data: { status: string; similarityHint?: SimilarityHint }) => {
+        if (data.status === 'ok' && data.similarityHint) {
+          setSimilaritySubmitHint(data.similarityHint);
+        }
+      },
+    );
 
     socket.on('question:moderated', (data: { questionId: string; action: string }) => {
       if (data.action === 'approve') {
@@ -265,6 +303,8 @@ export function usePool(poolCode: string | null) {
     };
   }, [poolCode]);
 
+  const dismissSimilarityHint = useCallback(() => setSimilaritySubmitHint(null), []);
+
   const submitQuestion = useCallback((text: string) => {
     socketRef.current?.emit('question:submit', { text });
   }, []);
@@ -285,6 +325,18 @@ export function usePool(poolCode: string | null) {
 
   const moderateQuestion = useCallback((questionId: string, action: 'approve' | 'reject') => {
     socketRef.current?.emit('question:moderate', { questionId, action });
+  }, []);
+
+  const markDisplayItemAnswered = useCallback((item: DisplayItem) => {
+    if (item.kind === 'cluster') {
+      socketRef.current?.emit('display-item:mark-answered', { clusterId: item.clusterId });
+    } else {
+      socketRef.current?.emit('display-item:mark-answered', { questionId: item.id });
+    }
+  }, []);
+
+  const setShowResolvedToParticipants = useCallback((value: boolean) => {
+    socketRef.current?.emit('pool:set-show-resolved', { showResolvedToParticipants: value });
   }, []);
 
   const triggerMerge = useCallback(() => {
@@ -335,10 +387,17 @@ export function usePool(poolCode: string | null) {
     });
   }, [displayItems, voteCounts]);
 
+  const sortedResolvedItems = useMemo(() => {
+    return [...resolvedItems].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }, [resolvedItems]);
+
     return {
     connected,
     pool,
     displayItems: sortedDisplayItems,
+    resolvedItems: sortedResolvedItems,
     flaggedQuestions,
     liveAudienceCount,
     participantRoster,
@@ -348,10 +407,14 @@ export function usePool(poolCode: string | null) {
     pollResults,
     pollLibraryRevision,
     mergeInProgress,
+    similaritySubmitHint,
+    dismissSimilarityHint,
     submitQuestion,
     voteDisplayItem,
     updateStatus,
     moderateQuestion,
+    markDisplayItemAnswered,
+    setShowResolvedToParticipants,
     triggerMerge,
     createPoll,
     launchPoll,

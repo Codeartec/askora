@@ -44,6 +44,7 @@ model Pool {
   closedAt              DateTime? @map("closed_at")
   questionsSinceMerge   Int       @default(0) @map("questions_since_merge")
   lastQuestionMergeAt   DateTime? @map("last_question_merge_at")
+  showResolvedToParticipants Boolean @default(false) @map("show_resolved_to_participants")
 
   creatorId String @map("creator_id") @db.Uuid
   creator   User   @relation(fields: [creatorId], references: [id])
@@ -102,6 +103,7 @@ model Question {
 model QuestionCluster {
   id          String   @id @default(uuid()) @db.Uuid
   unifiedText String   @map("unified_text") @db.Text
+  status      String   @default("active") @db.VarChar(20)
   createdAt   DateTime @default(now()) @map("created_at")
 
   poolId String @map("pool_id") @db.Uuid

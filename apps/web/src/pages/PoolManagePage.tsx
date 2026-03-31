@@ -5,8 +5,10 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Copy, Play, Square, Users, MessageSquare, ArrowLeft, Wifi, WifiOff, ShieldAlert, Check, X, Sparkles, ClipboardList, Plus, Send, PanelLeft, Trash2, Eye, EyeOff, ChevronDown, Loader2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Copy, Play, Square, Users, MessageSquare, ArrowLeft, Wifi, WifiOff, ShieldAlert, Check, X, Sparkles, ClipboardList, Plus, Send, PanelLeft, Trash2, Eye, EyeOff, ChevronDown, Loader2, QrCode, FileDown } from 'lucide-react';
+import { PoolJoinQrCode } from '@/components/PoolJoinQrCode';
+import { buildPoolJoinShareUrl, getPublicAppOrigin } from '@/lib/publicAppUrl';
 import { usePool, displayItemKey, type DisplayItem } from '@/hooks/usePool';
 import { Input } from '@/components/ui/input';
 import api from '@/lib/api';
@@ -43,6 +45,7 @@ function pollOptionCount(opt: PollResultOpt): number {
 export function PoolManagePage() {
   const { t } = useTranslation();
   const quickPollFormId = useId();
+  const showResolvedToggleId = useId();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [poolData, setPoolData] = useState<any>(null);
@@ -56,11 +59,13 @@ export function PoolManagePage() {
   const [showPollForm, setShowPollForm] = useState(false);
   const [showQuickResultsToAudience, setShowQuickResultsToAudience] = useState(false);
   const [participantsPanelOpen, setParticipantsPanelOpen] = useState(false);
+  const [presentQrOpen, setPresentQrOpen] = useState(false);
+  const [presentPdfLoading, setPresentPdfLoading] = useState(false);
   const [participantSearch, setParticipantSearch] = useState('');
   const [draftPolls, setDraftPolls] = useState<DraftPoll[]>([]);
   const [completedPolls, setCompletedPolls] = useState<CompletedPoll[]>([]);
   const [isMergeHighlightActive, setIsMergeHighlightActive] = useState(false);
-  const mergeHighlightTimeoutRef = useRef<number | null>(null);
+  const mergeHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     api.get(`/pools/${id}`).then(({ data }) => {
@@ -73,12 +78,15 @@ export function PoolManagePage() {
     connected,
     pool,
     displayItems,
+    resolvedItems,
     flaggedQuestions,
     liveAudienceCount,
     participantRoster,
     voteCounts,
     updateStatus,
     moderateQuestion,
+    markDisplayItemAnswered,
+    setShowResolvedToParticipants,
     triggerMerge,
     mergeInProgress,
     createPoll,
@@ -273,10 +281,9 @@ export function PoolManagePage() {
         ? 'bg-amber-50/40 border-amber-200/60 dark:bg-amber-950/10 dark:border-amber-900/30'
         : 'bg-muted/30 border-border';
 
-  const shareOrigin = globalThis.window?.location?.origin;
-  const shareUrl = shareOrigin
-    ? `${shareOrigin}/join?code=${encodeURIComponent(displayPool.code)}`
-    : '';
+  const shareOrigin = getPublicAppOrigin();
+  const shareUrl =
+    shareOrigin && displayPool.code ? buildPoolJoinShareUrl(shareOrigin, displayPool.code) : '';
 
   const copyShareLink = () => {
     if (!shareUrl) return;
@@ -286,6 +293,24 @@ export function PoolManagePage() {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     })();
+  };
+
+  const handleDownloadJoinPdf = async () => {
+    if (!shareUrl || !displayPool) return;
+    setPresentPdfLoading(true);
+    try {
+      const { downloadPoolJoinSheetPdf } = await import('@/lib/poolJoinPdf');
+      await downloadPoolJoinSheetPdf({
+        title: displayPool.title,
+        description: displayPool.description,
+        poolCode: displayPool.code,
+        shareUrl,
+      });
+    } catch {
+      globalThis.window?.alert?.(t('pool.downloadJoinPdfError'));
+    } finally {
+      setPresentPdfLoading(false);
+    }
   };
 
   return (
@@ -352,7 +377,7 @@ export function PoolManagePage() {
 
       <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-4">
         <Card className="flex h-full min-h-0 flex-col bg-linear-to-br from-violet-50/80 to-white border-border shadow-md dark:from-violet-950/20 dark:to-card">
-          <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
+          <CardContent className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
             <p className="text-sm text-muted-foreground">{t('pool.code')}</p>
             <div className="flex items-center justify-center gap-2">
               <span className="text-2xl font-mono font-bold tracking-widest">{displayPool.code}</span>
@@ -364,13 +389,16 @@ export function PoolManagePage() {
                 )}
               </Button>
             </div>
-            <div className="mt-2 flex items-center justify-center gap-2">
+            {isPrivatePool && accessKeyText !== '' && (
+              <p className="text-xs text-muted-foreground">{t('pool.privatePoolQrHint')}</p>
+            )}
+            <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 onClick={copyShareLink}
-                disabled={copiedLink}
+                disabled={!shareUrl || copiedLink}
                 className="gap-1.5 h-10 sm:h-9"
               >
                 {copiedLink ? (
@@ -379,6 +407,17 @@ export function PoolManagePage() {
                   <Copy className="h-3.5 w-3.5" />
                 )}
                 {copiedLink ? t('pool.linkCopied') : t('pool.copyLink')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => setPresentQrOpen(true)}
+                disabled={!shareUrl}
+                className="gap-1.5 h-10 sm:h-9"
+              >
+                <QrCode className="h-4 w-4 shrink-0" aria-hidden />
+                {t('pool.presentJoinView')}
               </Button>
             </div>
           </CardContent>
@@ -924,6 +963,20 @@ export function PoolManagePage() {
                         </details>
                       )}
                     </div>
+                    <div className="shrink-0 pt-0.5">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-9 w-9"
+                        disabled={!liveChannelOk}
+                        onClick={() => markDisplayItemAnswered(item)}
+                        aria-label={t('question.markAnsweredAria')}
+                        title={t('question.markAnswered')}
+                      >
+                        <Check className="h-4 w-4" aria-hidden />
+                      </Button>
+                    </div>
                   </div>
                 );
               })}
@@ -931,6 +984,117 @@ export function PoolManagePage() {
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-lg">{t('question.resolvedTitle')}</CardTitle>
+              <CardDescription className="mt-1">{t('question.resolvedDescription')}</CardDescription>
+            </div>
+            {liveChannelOk && (
+              <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm sm:max-w-xs">
+                <input
+                  id={showResolvedToggleId}
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-input"
+                  checked={
+                    pool?.showResolvedToParticipants ??
+                    poolData?.showResolvedToParticipants ??
+                    false
+                  }
+                  onChange={(e) => setShowResolvedToParticipants(e.target.checked)}
+                  aria-describedby={`${showResolvedToggleId}-hint`}
+                />
+                <div className="min-w-0">
+                  <label htmlFor={showResolvedToggleId} className="font-medium cursor-pointer">
+                    {t('question.showResolvedToParticipants')}
+                  </label>
+                  <p id={`${showResolvedToggleId}-hint`} className="mt-0.5 text-xs text-muted-foreground">
+                    {t('question.showResolvedToParticipantsHint')}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {resolvedItems.length === 0 ? (
+            <p className="text-center text-sm text-muted-foreground py-6">{t('question.resolvedEmpty')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {resolvedItems.map((item) => {
+                const key = displayItemKey(item);
+                const text = item.kind === 'cluster' ? item.unifiedText : item.originalText;
+                const authorLabel =
+                  item.kind === 'question'
+                    ? item.participant.isAnonymous
+                      ? t('participant.anonymous')
+                      : item.participant.displayName
+                    : t('question.mergedBadge');
+                return (
+                  <li
+                    key={key}
+                    className="flex items-start gap-3 rounded-lg border bg-muted/20 p-3 text-sm"
+                  >
+                    <div className="flex flex-col items-center min-w-[40px]">
+                      <span className="text-lg font-bold text-muted-foreground">{voteCounts[key] ?? item.voteCount}</span>
+                      <span className="text-[10px] text-muted-foreground">votes</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p>{text}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{authorLabel}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={presentQrOpen} onOpenChange={setPresentQrOpen}>
+        <DialogContent className="max-h-[95vh] max-w-[min(100vw-2rem,36rem)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{displayPool.title}</DialogTitle>
+            <DialogDescription>{t('pool.presentJoinDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-2">
+            {shareUrl ? (
+              <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-border/60">
+                <PoolJoinQrCode
+                  value={shareUrl}
+                  size={320}
+                  level="M"
+                  aria-label={t('pool.joinQrAria')}
+                />
+              </div>
+            ) : null}
+            {isPrivatePool && accessKeyText !== '' && (
+              <p className="text-center text-sm text-muted-foreground">{t('pool.privatePoolQrHint')}</p>
+            )}
+            {shareUrl ? (
+              <p className="break-all text-center text-sm font-mono text-muted-foreground">{shareUrl}</p>
+            ) : null}
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-center">
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              disabled={!shareUrl || presentPdfLoading}
+              onClick={() => void handleDownloadJoinPdf()}
+            >
+              {presentPdfLoading ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+              ) : (
+                <FileDown className="h-4 w-4 shrink-0" aria-hidden />
+              )}
+              {t('pool.downloadJoinPdf')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {typeof document !== 'undefined' &&
         createPortal(

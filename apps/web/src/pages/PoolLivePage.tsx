@@ -47,12 +47,15 @@ export function PoolLivePage() {
     connected,
     pool,
     displayItems,
+    resolvedItems,
     voteCounts,
     myVotes,
     liveAudienceCount,
     activePoll,
     pollResults,
     submitQuestion,
+    similaritySubmitHint,
+    dismissSimilarityHint,
     voteDisplayItem,
     respondToPoll,
   } = usePool(poolCode);
@@ -204,7 +207,7 @@ export function PoolLivePage() {
 
       {displayPool.status === 'active' && (
         <Card>
-          <CardContent className="p-4">
+          <CardContent className="space-y-3 p-4">
             <div className="flex gap-2">
               <Input
                 value={questionText}
@@ -219,6 +222,32 @@ export function PoolLivePage() {
                 {t('question.submit')}
               </Button>
             </div>
+            {similaritySubmitHint ? (
+              <div
+                role="status"
+                className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-foreground sm:flex-row sm:items-start sm:justify-between"
+              >
+                <p className="min-w-0 flex-1">
+                  {similaritySubmitHint.scope === 'live' &&
+                    (similaritySubmitHint.previewText.trim()
+                      ? t('question.similarityLiveHint', { text: similaritySubmitHint.previewText })
+                      : t('question.similarityLiveGeneric'))}
+                  {similaritySubmitHint.scope === 'resolved' &&
+                    (similaritySubmitHint.previewText.trim()
+                      ? t('question.similarityResolvedHint', { text: similaritySubmitHint.previewText })
+                      : t('question.similarityResolvedGeneric'))}
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 shrink-0 self-end text-muted-foreground hover:text-foreground"
+                  onClick={dismissSimilarityHint}
+                >
+                  {t('question.similarityDismiss')}
+                </Button>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       )}
@@ -373,6 +402,42 @@ export function PoolLivePage() {
           })
         )}
       </div>
+
+      {pool?.showResolvedToParticipants && resolvedItems.length > 0 && (
+        <Card className="border-muted">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">{t('question.resolvedTitle')}</CardTitle>
+            <CardDescription>{t('question.resolvedParticipantHint')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {resolvedItems.map((item) => {
+              const key = displayItemKey(item);
+              const text = item.kind === 'cluster' ? item.unifiedText : item.originalText;
+              let authorLabel: string;
+              if (item.kind === 'question') {
+                authorLabel = item.participant.isAnonymous ? t('participant.anonymous') : item.participant.displayName ?? '';
+              } else {
+                authorLabel = t('question.mergedBadge');
+              }
+              return (
+                <div
+                  key={key}
+                  className="flex items-start gap-3 rounded-lg border border-border/80 bg-muted/20 p-3"
+                >
+                  <div className="flex flex-col items-center min-w-[44px] pt-0.5 text-muted-foreground">
+                    <ThumbsUp className="h-4 w-4 opacity-50" aria-hidden />
+                    <span className="text-sm font-semibold tabular-nums">{voteCounts[key] ?? item.voteCount}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm">{text}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{authorLabel}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

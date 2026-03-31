@@ -15,6 +15,7 @@ import { PoolsService } from './pools.service';
 import { QuestionsService } from '../questions/questions.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { MergeService } from '../questions/merge.service';
+import { QuestionSimilarityService } from '../questions/question-similarity.service';
 import { PollsService } from '../polls/polls.service';
 
 @WebSocketGateway({
@@ -32,6 +33,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private questionsService: QuestionsService,
     private moderationService: ModerationService,
     private mergeService: MergeService,
+    private questionSimilarityService: QuestionSimilarityService,
     private pollsService: PollsService,
   ) {}
 
@@ -147,6 +149,11 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const includeSources = jwtUserId === pool.creatorId;
     const displayItems = await this.questionsService.buildDisplayItems(pool.id, includeSources);
 
+    const resolvedItems =
+      includeSources || pool.showResolvedToParticipants
+        ? await this.questionsService.buildResolvedDisplayItems(pool.id, includeSources)
+        : [];
+
     const activePollRow = await this.pollsService.findActiveByPoolId(pool.id);
     const activePoll = activePollRow
       ? {
@@ -171,8 +178,10 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         creator: pool.creator,
         lastQuestionMergeAt: pool.lastQuestionMergeAt?.toISOString() ?? null,
         questionsSinceMerge: pool.questionsSinceMerge,
+        showResolvedToParticipants: pool.showResolvedToParticipants,
       },
       displayItems,
+      resolvedItems,
       participantCount,
       activePoll,
     });
@@ -208,6 +217,34 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const updated = await this.poolsService.updateStatus(pool.id, data.status);
     this.server.to(`pool:${poolCode}`).emit('pool:status-changed', { status: updated.status });
+  }
+
+  @SubscribeMessage('pool:set-show-resolved')
+  async handleSetShowResolved(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { showResolvedToParticipants: boolean },
+  ) {
+    if (!(await this.ensureJwtAuth(client))) {
+      client.emit('error', { message: 'Unauthorized' });
+      return;
+    }
+
+    const poolCode = client.data.poolCode;
+    const poolId = client.data.poolId;
+    if (!poolCode || !poolId) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user.id) {
+      client.emit('error', { message: 'Not the pool creator' });
+      return;
+    }
+
+    await this.prisma.pool.update({
+      where: { id: poolId },
+      data: { showResolvedToParticipants: !!data.showResolvedToParticipants },
+    });
+
+    await this.broadcastDisplaySync(poolCode, poolId, pool.creatorId);
   }
 
   @SubscribeMessage('question:submit')
@@ -253,6 +290,13 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     if (moderationStatus === 'approved') {
+      const similarityHint = await this.questionSimilarityService.findHintForNewQuestion(
+        poolId,
+        data.text,
+        question.id,
+        pool.showResolvedToParticipants,
+      );
+
       const updatedPool = await this.prisma.pool.update({
         where: { id: poolId },
         data: { questionsSinceMerge: { increment: 1 } },
@@ -269,6 +313,11 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.server.to(`pool:${poolCode}`).emit('question:new', { displayItem });
         }
       }
+
+      client.emit('question:submitted', {
+        status: 'ok',
+        ...(similarityHint ? { similarityHint } : {}),
+      });
     } else {
       this.server.to(`pool:${poolCode}:admin`).emit('question:flagged', {
         question,
@@ -352,6 +401,40 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     client.emit('question:moderated', { questionId: data.questionId, action: data.action });
+  }
+
+  @SubscribeMessage('display-item:mark-answered')
+  async handleDisplayItemMarkAnswered(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { questionId?: string; clusterId?: string },
+  ) {
+    if (!(await this.ensureJwtAuth(client))) {
+      client.emit('error', { message: 'Unauthorized' });
+      return;
+    }
+
+    const poolCode = client.data.poolCode;
+    const poolId = client.data.poolId;
+    if (!poolCode || !poolId) return;
+
+    const pool = await this.poolsService.findByCode(poolCode);
+    if (!pool || pool.creatorId !== client.data.user.id) {
+      client.emit('error', { message: 'Not the pool creator' });
+      return;
+    }
+
+    const result = await this.questionsService.markDisplayItemAnswered({
+      poolId,
+      questionId: data.questionId,
+      clusterId: data.clusterId,
+    });
+
+    if (!result.ok) {
+      client.emit('error', { message: 'Cannot mark as answered' });
+      return;
+    }
+
+    await this.broadcastDisplaySync(poolCode, poolId, pool.creatorId);
   }
 
   @SubscribeMessage('llm:trigger-merge')
@@ -548,6 +631,25 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return uid !== undefined && uid === creatorId;
   }
 
+  /** Roster badge: use participant.userId when present (avoids JWT shadowing session on shared browsers). */
+  private rosterIsHost(remote: { data?: any; handshake?: any }, creatorId: string): boolean {
+    const data = remote.data as {
+      participant?: { userId?: string | null };
+      user?: { id: string };
+    } | undefined;
+    if (data?.participant) {
+      const uid = data.participant.userId;
+      if (uid != null && uid !== '') {
+        return uid === creatorId;
+      }
+      return false;
+    }
+    if (data?.user?.id) {
+      return data.user.id === creatorId;
+    }
+    return false;
+  }
+
   private getParticipantId(client: Socket): string | null {
     if (client.data.participant) return client.data.participant.id;
     return client.data.participantId || null;
@@ -581,16 +683,22 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const poolSlice = {
       lastQuestionMergeAt: poolRow.lastQuestionMergeAt?.toISOString() ?? null,
       questionsSinceMerge: poolRow.questionsSinceMerge,
+      showResolvedToParticipants: poolRow.showResolvedToParticipants,
     };
 
     const publicItems = await this.questionsService.buildDisplayItems(poolId, false);
     const adminItems = await this.questionsService.buildDisplayItems(poolId, true);
+    const resolvedPublic = await this.questionsService.buildResolvedDisplayItems(poolId, false);
+    const resolvedAdmin = await this.questionsService.buildResolvedDisplayItems(poolId, true);
     const roomName = `pool:${poolCode}`;
     const sockets = await this.server.in(roomName).fetchSockets();
 
     for (const s of sockets) {
-      const items = this.remoteIsPoolCreator(s, creatorId) ? adminItems : publicItems;
-      s.emit('questions:merged-sync', { displayItems: items, pool: poolSlice });
+      const isCreator = this.remoteIsPoolCreator(s, creatorId);
+      const items = isCreator ? adminItems : publicItems;
+      const resolvedItems =
+        isCreator || poolRow.showResolvedToParticipants ? (isCreator ? resolvedAdmin : resolvedPublic) : [];
+      s.emit('questions:merged-sync', { displayItems: items, pool: poolSlice, resolvedItems });
     }
   }
 
@@ -606,13 +714,14 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     let anonymousCount = 0;
 
     for (const remote of sockets) {
-      const isHost = this.remoteIsPoolCreator(remote, pool.creatorId);
-      if (isHost) {
+      if (this.remoteIsPoolCreator(remote, pool.creatorId)) {
         hostSocketCount += 1;
       }
 
+      const rosterHost = this.rosterIsHost(remote, pool.creatorId);
+
       const data = remote.data as {
-        participant?: { id: string; displayName: string | null; isAnonymous: boolean };
+        participant?: { id: string; displayName: string | null; isAnonymous: boolean; userId?: string | null };
         user?: { id: string; name: string };
       };
 
@@ -621,10 +730,10 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (p.isAnonymous || !p.displayName) {
           anonymousCount += 1;
         } else {
-          namedDraft.push({ id: p.id, displayName: p.displayName, isHost });
+          namedDraft.push({ id: p.id, displayName: p.displayName, isHost: rosterHost });
         }
       } else if (data.user) {
-        namedDraft.push({ id: data.user.id, displayName: data.user.name, isHost });
+        namedDraft.push({ id: data.user.id, displayName: data.user.name, isHost: rosterHost });
       } else {
         anonymousCount += 1;
       }

@@ -8,6 +8,7 @@ import { RegisterPage } from '@/pages/RegisterPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage';
 import { JoinPoolPage } from '@/pages/JoinPoolPage';
+import { JoinShortRedirect } from '@/pages/JoinShortRedirect';
 import { CreatePoolPage } from '@/pages/CreatePoolPage';
 import { PoolManagePage } from '@/pages/PoolManagePage';
 import { PoolLivePage } from '@/pages/PoolLivePage';
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/join" element={<JoinPoolPage />} />
+          <Route path="/j/:code" element={<JoinShortRedirect />} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
           <Route path="/pools/create" element={<ProtectedRoute><CreatePoolPage /></ProtectedRoute>} />
