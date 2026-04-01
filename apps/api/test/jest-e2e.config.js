@@ -9,6 +9,8 @@ module.exports = {
       { tsconfig: { types: ['jest', 'node'] } },
     ],
   },
-  transformIgnorePatterns: ['node_modules/(?!uuid/)'],
+  moduleNameMapper: {
+    '^uuid$': '<rootDir>/test/__mocks__/uuid.js',
+  },
   testEnvironment: 'node',
 };
