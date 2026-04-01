@@ -238,7 +238,7 @@ export class PoolsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const updated = await this.poolsService.updateStatus(pool.id, data.status);
+    const updated = await this.poolsService.updateStatus(pool.id, data.status, client.data.user.id);
     this.server.to(`pool:${poolCode}`).emit('pool:status-changed', { status: updated.status });
   }
 

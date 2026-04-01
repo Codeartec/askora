@@ -91,14 +91,14 @@ export class PoolsController {
 
   @Get(':id')
   @UseGuards(AuthGuard('jwt'))
-  getById(@Param('id') id: string) {
-    return this.poolsService.findById(id);
+  getById(@Param('id') id: string, @Req() req: any) {
+    return this.poolsService.findByIdForOwner(id, req.user.id);
   }
 
   @Patch(':id/status')
   @UseGuards(AuthGuard('jwt'))
-  updateStatus(@Param('id') id: string, @Body('status') status: string) {
-    return this.poolsService.updateStatus(id, status);
+  updateStatus(@Param('id') id: string, @Body('status') status: string, @Req() req: any) {
+    return this.poolsService.updateStatus(id, status, req.user.id);
   }
 
   @Post(':id/join')
@@ -109,8 +109,8 @@ export class PoolsController {
 
   @Patch(':id')
   @UseGuards(AuthGuard('jwt'))
-  update(@Param('id') id: string, @Body() body: any) {
-    return this.poolsService.update(id, body);
+  update(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.poolsService.update(id, body, req.user.id);
   }
 
   @Delete(':id')

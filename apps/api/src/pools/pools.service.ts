@@ -38,6 +38,19 @@ export class PoolsService {
     return this.prisma.pool.findUnique({ where: { id }, include: { creator: { select: { id: true, name: true, avatarUrl: true } } } });
   }
 
+  private async findByIdOrFail(id: string) {
+    const pool = await this.prisma.pool.findUnique({ where: { id } });
+    if (!pool) throw new NotFoundException('Pool not found');
+    return pool;
+  }
+
+  async findByIdForOwner(id: string, userId: string) {
+    const pool = await this.findById(id);
+    if (!pool) throw new NotFoundException('Pool not found');
+    if (pool.creatorId !== userId) throw new ForbiddenException();
+    return pool;
+  }
+
   async findPublicLiveMeta(id: string) {
     const pool = await this.prisma.pool.findUnique({
       where: { id },
@@ -72,14 +85,18 @@ export class PoolsService {
     });
   }
 
-  async updateStatus(id: string, status: string) {
+  async updateStatus(id: string, status: string, userId: string) {
+    const pool = await this.findByIdOrFail(id);
+    if (pool.creatorId !== userId) throw new ForbiddenException();
     const data: any = { status };
     if (status === 'active') data.openedAt = new Date();
     if (status === 'closed') data.closedAt = new Date();
     return this.prisma.pool.update({ where: { id }, data });
   }
 
-  async update(id: string, data: any) {
+  async update(id: string, data: any, userId: string) {
+    const pool = await this.findByIdOrFail(id);
+    if (pool.creatorId !== userId) throw new ForbiddenException();
     return this.prisma.pool.update({ where: { id }, data });
   }
 
